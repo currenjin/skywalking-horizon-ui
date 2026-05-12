@@ -41,46 +41,90 @@ jobs:
   dependency-license:
     name: Dependency licenses
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Install dependencies
-        run: npm ci || npm install
-      - name: Resolve and verify dependency licenses
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - name: Install license-eye
         run: |
           go install github.com/apache/skywalking-eyes/cmd/license-eye@5b7ee1731d036b5aac68f8bd3fc9e6f98ada082e
-          license-eye -v debug dependency resolve || exit 1
+      - name: Verify dependency licenses
+        run: license-eye -v debug dependency resolve
 
-  build:
-    name: Build & type-check
+  type-check:
+    name: Type-check (workspaces)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm ci || npm install
-      - run: npm run lint
-      - run: npm run type-check
-      - run: npm run build
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r run type-check
+
+  build-ui:
+    name: Build · @skywalking-horizon-ui/ui
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @skywalking-horizon-ui/ui build
+
+  build-bff:
+    name: Build · @skywalking-horizon-ui/bff
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @skywalking-horizon-ui/bff build
 
   sanity-check:
     if: always() && !cancelled()
     name: Sanity check results
-    needs: [license-header, dependency-license, build]
+    needs: [license-header, dependency-license, type-check, build-ui, build-bff]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - name: Check results
         run: |
           [[ ${{ needs.license-header.result }} == 'success' ]] || exit 1
           [[ ${{ needs.dependency-license.result }} == 'success' ]] || exit 1
-          [[ ${{ needs.build.result }} == 'success' ]] || exit 1
+          [[ ${{ needs.type-check.result }} == 'success' ]] || exit 1
+          [[ ${{ needs.build-ui.result }} == 'success' ]] || exit 1
+          [[ ${{ needs.build-bff.result }} == 'success' ]] || exit 1
