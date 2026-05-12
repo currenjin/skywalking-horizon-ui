@@ -118,9 +118,9 @@ function load(): Map<string, LayerTemplate> {
   for (const file of readdirSync(CONFIG_DIR)) {
     if (!file.endsWith('.json')) continue;
     const raw = readFileSync(join(CONFIG_DIR, file), 'utf-8');
-    let parsed: LayerTemplate;
+    let parsed: LayerTemplate & { alias_terms?: LayerSlotsConfig; alias?: LayerSlotsConfig | string };
     try {
-      parsed = JSON.parse(raw) as LayerTemplate;
+      parsed = JSON.parse(raw);
     } catch (err) {
       throw new Error(`failed to parse layer config ${file}: ${err instanceof Error ? err.message : err}`);
     }
@@ -129,6 +129,16 @@ function load(): Map<string, LayerTemplate> {
       throw new Error(
         `layer config ${file}: file basename does not match \`key\` (${parsed.key})`,
       );
+    }
+    // Schema migration: per-layer entity term overrides used to live
+    // under `slots` in the JSON; the more readable `aliases` (plural,
+    // distinct from the existing top-level `alias` = layer display
+    // name) is now accepted as the primary key. TS code keeps `slots`
+    // internally — we normalize here so the rest of the BFF + UI
+    // doesn't need to know which the operator wrote.
+    const aliases = (parsed as { aliases?: LayerSlotsConfig }).aliases;
+    if (!parsed.slots && aliases) {
+      parsed.slots = aliases;
     }
     // Migrate legacy `widgets` (flat array) → `dashboards.service` so
     // the rest of the codebase only needs to know about the new shape.

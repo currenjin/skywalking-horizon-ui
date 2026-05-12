@@ -80,6 +80,8 @@ export interface AdminLayerTemplate {
       unit?: string;
       mqe?: string;
       aggregation?: 'sum' | 'avg';
+      scale?: number;
+      precision?: number;
     }>;
   };
   widgets: DashboardWidget[];

@@ -3,7 +3,7 @@
   "alias": "General Service",
   "color": "var(--sw-accent)",
   "documentLink": "https://skywalking.apache.org/docs/main/latest/en/setup/service-agent/",
-  "slots": {
+  "aliases": {
     "services": "Services",
     "instances": "Instances",
     "endpoints": "API",

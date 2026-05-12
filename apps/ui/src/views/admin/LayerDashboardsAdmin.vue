@@ -168,6 +168,47 @@ function reset(): void {
 const selectedTpl = computed(() => draft.template);
 const currentWidgets = computed(() => widgetsFor(activeScope.value));
 
+/**
+ * Metrics-block editor. The metrics block lives directly on the
+ * draft template; mutations flow through Vue's reactive proxy so the
+ * dirty diff picks them up and Save enables. We ensure the
+ * `metrics.columns` array exists before binding so the template can
+ * safely v-model into it.
+ */
+function ensureMetrics(): NonNullable<AdminLayerTemplate['metrics']> {
+  if (!draft.template) throw new Error('no template selected');
+  if (!draft.template.metrics) {
+    (draft.template as AdminLayerTemplate).metrics = {};
+  }
+  return draft.template.metrics as NonNullable<AdminLayerTemplate['metrics']>;
+}
+const metricsModel = computed(() => {
+  if (!draft.template) return null;
+  // Touch ensureMetrics on read so the keys are present for v-model.
+  ensureMetrics();
+  return draft.template.metrics as NonNullable<AdminLayerTemplate['metrics']>;
+});
+const metricsColumns = computed(() => {
+  if (!draft.template) return [];
+  const m = ensureMetrics();
+  if (!m.columns) m.columns = [];
+  return m.columns;
+});
+function addMetricColumn(): void {
+  if (!draft.template) return;
+  const m = ensureMetrics();
+  if (!m.columns) m.columns = [];
+  m.columns.push({
+    metric: `metric_${m.columns.length + 1}`,
+    label: `Metric ${m.columns.length + 1}`,
+    aggregation: 'avg',
+  });
+}
+function deleteMetricColumn(i: number): void {
+  if (!draft.template?.metrics?.columns) return;
+  draft.template.metrics.columns.splice(i, 1);
+}
+
 function componentFlags(t: AdminLayerTemplate): string[] {
   const c = t.components;
   const out: string[] = [];
@@ -251,6 +292,76 @@ function componentFlags(t: AdminLayerTemplate): string[] {
               </button>
             </div>
           </div>
+        </section>
+
+        <!-- Metrics editor (the layer's summary KPI columns + the
+             orderBy / throughput / spark selectors). These drive the
+             Overview KPI tile and the per-layer header summary. -->
+        <section class="sw-card metrics-card">
+          <div class="card-head">
+            <h4>Summary metrics</h4>
+            <span class="sub">columns shown on the Overview KPI tile + per-layer header</span>
+            <button class="sw-btn add" type="button" @click="addMetricColumn">＋ Add column</button>
+          </div>
+          <div v-if="metricsModel" class="metrics-keys">
+            <label>
+              <span>orderBy</span>
+              <select v-model="metricsModel.orderBy">
+                <option :value="undefined">(first column)</option>
+                <option v-for="c in metricsColumns" :key="c.metric" :value="c.metric">{{ c.metric }}</option>
+              </select>
+            </label>
+            <label>
+              <span>throughput</span>
+              <select v-model="metricsModel.throughput">
+                <option :value="undefined">(orderBy)</option>
+                <option v-for="c in metricsColumns" :key="c.metric" :value="c.metric">{{ c.metric }}</option>
+              </select>
+            </label>
+            <label>
+              <span>spark</span>
+              <select v-model="metricsModel.spark">
+                <option :value="undefined">(throughput)</option>
+                <option v-for="c in metricsColumns" :key="c.metric" :value="c.metric">{{ c.metric }}</option>
+              </select>
+            </label>
+          </div>
+          <div v-if="metricsColumns.length === 0" class="empty inset">
+            No metric columns defined. Click "Add column" to start.
+          </div>
+          <table v-else class="sw-table metrics-table">
+            <thead>
+              <tr>
+                <th>metric</th>
+                <th>label</th>
+                <th>unit</th>
+                <th>aggregation</th>
+                <th class="grow">mqe</th>
+                <th>scale</th>
+                <th>precision</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(c, i) in metricsColumns" :key="i">
+                <td><input class="mono" v-model="c.metric" /></td>
+                <td><input v-model="c.label" /></td>
+                <td><input v-model="c.unit" placeholder="—" /></td>
+                <td>
+                  <select v-model="c.aggregation">
+                    <option value="sum">sum</option>
+                    <option value="avg">avg</option>
+                  </select>
+                </td>
+                <td><input class="mono" v-model="c.mqe" placeholder="catalog default" /></td>
+                <td><input type="number" step="any" v-model.number="c.scale" placeholder="1" /></td>
+                <td><input type="number" min="0" max="6" v-model.number="c.precision" placeholder="auto" /></td>
+                <td>
+                  <button class="sw-btn danger" type="button" @click="deleteMetricColumn(i)">✕</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </section>
 
         <!-- Scope tabs -->
@@ -567,6 +678,83 @@ function componentFlags(t: AdminLayerTemplate): string[] {
   color: var(--sw-fg-3);
 }
 .scope-tab.on .count { color: var(--sw-accent-2); }
+
+.metrics-card { padding: 0; }
+.metrics-card .card-head .add {
+  margin-left: auto;
+  font-size: 11.5px;
+  background: var(--sw-accent-soft);
+  color: var(--sw-accent-2);
+  border-color: var(--sw-accent-line);
+}
+.metrics-keys {
+  display: flex;
+  gap: 14px;
+  padding: 10px 16px;
+  border-bottom: 1px dashed var(--sw-line);
+}
+.metrics-keys label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 10.5px;
+  color: var(--sw-fg-3);
+  min-width: 120px;
+}
+.metrics-keys select {
+  height: 26px;
+  padding: 0 8px;
+  background: var(--sw-bg-2);
+  border: 1px solid var(--sw-line-2);
+  border-radius: 4px;
+  color: var(--sw-fg-0);
+  font: inherit;
+  font-size: 11.5px;
+}
+.metrics-table {
+  width: 100%;
+}
+.metrics-table th {
+  text-align: left;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--sw-fg-3);
+  font-weight: 500;
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid var(--sw-line);
+}
+.metrics-table th.grow {
+  width: 35%;
+}
+.metrics-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--sw-line);
+}
+.metrics-table input,
+.metrics-table select {
+  width: 100%;
+  height: 26px;
+  padding: 0 6px;
+  background: var(--sw-bg-2);
+  border: 1px solid var(--sw-line-2);
+  border-radius: 3px;
+  color: var(--sw-fg-0);
+  font: inherit;
+  font-size: 11.5px;
+}
+.metrics-table input.mono {
+  font-family: var(--sw-mono);
+  font-size: 11px;
+}
+.metrics-table .sw-btn.danger {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font-size: 11px;
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
 
 .widgets-card { padding: 0; }
 .card-head {
