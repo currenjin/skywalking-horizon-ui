@@ -73,7 +73,7 @@ const shellRoutes: RouteRecordRaw[] = [
   // Marketplace — all dashboards / templates across layers
   { path: 'operate/marketplace', component: placeholder, props: { title: 'Marketplace', phase: 'Phase 2', note: 'All dashboard templates browse + clone + customize.' } },
   // Cluster
-  { path: 'operate/cluster', component: placeholder, props: { title: 'Cluster status', phase: 'Phase 6 / 7', note: 'Module activity matrix · storage health · receiver activity · effective config tree · TTL grid.' } },
+  { path: 'operate/cluster', component: () => import('@/views/operate/ClusterStatusView.vue') },
   // DSL Management
   { path: 'operate/dsl/:catalog(otel-rules|telegraf-rules|lal|log-mal-rules)', component: placeholder, props: (r) => ({ title: `DSL · ${r.params.catalog}`, phase: 'Phase 6', note: 'Rule catalog grid + filter + new-rule form. Click a rule to open the editor.' }) },
   { path: 'operate/dsl/:catalog(otel-rules|telegraf-rules|lal|log-mal-rules)/:name', component: placeholder, props: (r) => ({ title: `Edit · ${r.params.name}`, phase: 'Phase 6', note: 'Monaco YAML + diff vs server + diff vs bundled + destructive-confirm.' }) },

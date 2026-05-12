@@ -15,13 +15,19 @@
  * limitations under the License.
  */
 
-import type { MenuResponse, SetupResponse, SetupSavePayload } from '@skywalking-horizon-ui/api-client';
+import type {
+  MenuResponse,
+  OapInfo,
+  SetupResponse,
+  SetupSavePayload,
+} from '@skywalking-horizon-ui/api-client';
 
 export type {
   MenuResponse,
   LayerDef,
   LayerCaps,
   LayerSlots,
+  OapInfo,
   SetupResponse,
   SetupSavePayload,
   LayerConfig,
@@ -103,6 +109,10 @@ export class BffClient {
   // ── menu / layers ────────────────────────────────────────────────────
   menu(): Promise<MenuResponse> {
     return this.request<MenuResponse>('GET', '/api/menu');
+  }
+
+  oapInfo(): Promise<OapInfo> {
+    return this.request<OapInfo>('GET', '/api/oap/info');
   }
 
   // ── setup (per-layer overrides) ──────────────────────────────────────

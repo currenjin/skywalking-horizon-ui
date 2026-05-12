@@ -24,6 +24,8 @@ export type {
   SetupResponse,
   SetupSavePayload,
 } from './setup.js';
+export type { OapInfo } from './oap-info.js';
+export { parseOapTimezoneMinutes } from './oap-info.js';
 export {
   RuntimeRuleClient,
   type RuntimeRuleClientOptions,
