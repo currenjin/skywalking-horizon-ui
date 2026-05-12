@@ -65,6 +65,8 @@ const widgetSchema = z.object({
   type: z.enum(['card', 'line', 'top']),
   expressions: z.array(z.string().min(1)).min(1).max(8),
   expressionLabels: z.array(z.string()).max(8).optional(),
+  expressionUnits: z.array(z.string()).max(8).optional(),
+  expressionAxes: z.array(z.number().int().min(0).max(1)).max(8).optional(),
   unit: z.string().optional(),
   span: z.number().int().min(1).max(12).optional(),
   rowSpan: z.number().int().min(1).max(64).optional(),
@@ -193,9 +195,12 @@ function avgOf(series: Array<number | null> | null): number | null {
  * Time-series MQE responses can carry multiple labeled results (one
  * relabel() call returns 5 results, one per percentile). Convert each
  * to a `DashboardSeries`. The label preference order:
- *  - explicit `relabels(..., key='...')` from metric.labels
- *  - the OAP id field (e.g., `endpoint_percentile{p='99'}`)
- *  - fallback to the raw expression
+ *  - explicit `relabels(..., key='...')` from metric.labels (multi-series)
+ *  - fallback to the caller's expression text (single-series)
+ *
+ * Do NOT use `values[0].id` as a label — for time-series MQEs, OAP
+ * returns the per-bucket timestamp/index as the value id, which is
+ * useless as a series label.
  */
 function parseLabeledSeries(
   r: MqeResultShape | undefined,
@@ -211,22 +216,26 @@ function parseLabeledSeries(
       const n = Number(v.value);
       return Number.isFinite(n) ? n : null;
     });
-    // Prefer the most-specific label OAP returned. relabels() adds a
-    // `percentile` key; raw `service_percentile{p='99'}` shows up as
-    // `p='99'`. Either way, take the last (most-derived) entry.
+    // For relabels() results OAP returns multi-result responses with
+    // metric.labels populated — take the last (most-derived) label
+    // value, e.g. `percentile='99'`. Single-series results have no
+    // labels; fall back to the operator's expression text.
     const labels = rs.metric?.labels ?? [];
-    const lbl =
-      labels.length > 0
-        ? labels[labels.length - 1].value
-        : values[0]?.id ?? fallbackLabel;
+    const lbl = labels.length > 0 ? labels[labels.length - 1].value : fallbackLabel;
     out.push({ label: lbl, data });
   }
   return out.length > 0 ? out : null;
 }
 
-/** Extract a sorted list from a `top_n(...)` MQE response. Owner.endpointName
- *  / serviceInstanceName / serviceName takes priority over the bare id
- *  so operators see readable rows. */
+/**
+ * Extract a sorted list from a `top_n(...)` MQE response. Names follow
+ * an entity-scope priority so layer-wide top lists (where the same
+ * endpoint can appear in multiple services) stay disambiguated:
+ *   Endpoint    →  "<service> · <endpoint>"  (or just endpoint when alone)
+ *   Instance    →  "<service> · <instance>"
+ *   Service     →  service
+ *   fallback    →  raw id
+ */
 function parseTopList(
   r: MqeResultShape | undefined,
 ): Array<{ name: string; value: number | null }> | null {
@@ -234,12 +243,19 @@ function parseTopList(
   const values = r.results?.[0]?.values ?? [];
   if (values.length === 0) return null;
   return values.map((v) => {
-    const name =
-      v.owner?.endpointName ??
-      v.owner?.serviceInstanceName ??
-      v.owner?.serviceName ??
-      v.id ??
-      '—';
+    const o = v.owner;
+    let name = '—';
+    if (o?.endpointName) {
+      name = o.serviceName ? `${o.serviceName} · ${o.endpointName}` : o.endpointName;
+    } else if (o?.serviceInstanceName) {
+      name = o.serviceName
+        ? `${o.serviceName} · ${o.serviceInstanceName}`
+        : o.serviceInstanceName;
+    } else if (o?.serviceName) {
+      name = o.serviceName;
+    } else if (v.id) {
+      name = v.id;
+    }
     const num = v.value !== null && v.value !== undefined ? Number(v.value) : null;
     return { name, value: Number.isFinite(num as number) ? (num as number) : null };
   });
@@ -360,13 +376,20 @@ export function registerDashboardRoute(app: FastifyInstance, deps: DashboardRout
           const groups: Array<{
             label: string;
             expression: string;
+            unit?: string;
             items: NonNullable<ReturnType<typeof parseTopList>>;
           }> = [];
           widget.expressions.forEach((expr, eIdx) => {
             const items = parseTopList(data[`w${wIdx}_e${eIdx}`]);
             if (!items) return;
             const label = widget.expressionLabels?.[eIdx] ?? expr;
-            groups.push({ label, expression: expr, items });
+            const unit = widget.expressionUnits?.[eIdx];
+            groups.push({
+              label,
+              expression: expr,
+              ...(unit ? { unit } : {}),
+              items,
+            });
           });
           if (groups.length === 0) return { id: widget.id, error: 'no data' };
           return {
@@ -388,11 +411,32 @@ export function registerDashboardRoute(app: FastifyInstance, deps: DashboardRout
 
         // 'line' — concat every result from every expression. One MQE
         // can return N labeled series (relabels()), so we don't assume
-        // 1:1 between expressions and series.
-        const flat: { label: string; data: Array<number | null> }[] = [];
+        // 1:1 between expressions and series. yAxisIndex + unit come
+        // from the widget's per-expression overrides (when present).
+        const flat: Array<{
+          label: string;
+          data: Array<number | null>;
+          yAxisIndex?: number;
+          unit?: string;
+        }> = [];
         widget.expressions.forEach((expr, eIdx) => {
           const labeled = parseLabeledSeries(data[`w${wIdx}_e${eIdx}`], expr);
-          if (labeled) flat.push(...labeled);
+          if (!labeled) return;
+          const labelOverride = widget.expressionLabels?.[eIdx];
+          const axis = widget.expressionAxes?.[eIdx];
+          const unit = widget.expressionUnits?.[eIdx];
+          for (const s of labeled) {
+            flat.push({
+              // When the operator supplied an explicit expressionLabel
+              // for a single-series expression, prefer that over the
+              // OAP-side relabels value. Multi-series MQEs (relabels)
+              // already arrive with sensible labels.
+              label: labeled.length === 1 && labelOverride ? labelOverride : s.label,
+              data: s.data,
+              ...(axis !== undefined ? { yAxisIndex: axis } : {}),
+              ...(unit !== undefined ? { unit } : {}),
+            });
+          }
         });
         if (flat.length === 0) return { id: widget.id, error: 'no data' };
         return { id: widget.id, series: flat };

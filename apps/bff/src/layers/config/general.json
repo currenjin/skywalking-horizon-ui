@@ -37,34 +37,16 @@
         "title": "Top 20 APIs",
         "tip": "Layer-wide ranking. Switch tabs to re-rank by:\n  Traffic        top_n(endpoint_cpm,20,des)\n  Slow response  top_n(endpoint_resp_time,20,des)\n  Worst SR       top_n(endpoint_sla,20,asc)/100",
         "type": "top",
-        "unit": "rpm",
         "expressions": [
           "top_n(endpoint_cpm,20,des)",
           "top_n(endpoint_resp_time,20,des)",
           "top_n(endpoint_sla,20,asc)/100"
         ],
-        "expressionLabels": ["Traffic", "Slow", "SR"],
+        "expressionLabels": ["Traffic", "Slow", "Successful Rate"],
+        "expressionUnits": ["rpm", "ms", "%"],
         "layerScope": true,
         "span": 3,
         "rowSpan": 4
-      },
-      {
-        "id": "apdex_line",
-        "title": "Apdex",
-        "tip": "service_apdex/10000 — 0 to 1 satisfaction score.",
-        "type": "line",
-        "expressions": ["service_apdex/10000"],
-        "span": 3,
-        "rowSpan": 2
-      },
-      {
-        "id": "sla_line",
-        "title": "Success Rate",
-        "type": "line",
-        "unit": "%",
-        "expressions": ["service_sla/100"],
-        "span": 3,
-        "rowSpan": 2
       },
       {
         "id": "traffic_line",
@@ -76,11 +58,20 @@
         "rowSpan": 2
       },
       {
-        "id": "resp_time_line",
-        "title": "Avg Response Time",
+        "id": "err_line",
+        "title": "Error Rate",
         "type": "line",
-        "unit": "ms",
-        "expressions": ["service_resp_time"],
+        "unit": "%",
+        "expressions": ["100 - service_sla/100"],
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "apdex_line",
+        "title": "Apdex",
+        "tip": "service_apdex/10000 — 0 to 1 satisfaction score.",
+        "type": "line",
+        "expressions": ["service_apdex/10000"],
         "span": 3,
         "rowSpan": 2
       },
@@ -97,33 +88,28 @@
         "rowSpan": 2
       },
       {
-        "id": "err_line",
-        "title": "Error Rate",
+        "id": "resp_time_line",
+        "title": "Avg Response Time",
         "type": "line",
-        "unit": "%",
-        "expressions": ["100 - service_sla/100"],
+        "unit": "ms",
+        "expressions": ["service_resp_time"],
         "span": 3,
         "rowSpan": 2
       },
       {
-        "id": "mq_consume_count",
-        "title": "MQ Consuming Count",
-        "tip": "service_mq_consume_count — only shown when the service emits MQ metrics.",
+        "id": "mq_combined",
+        "title": "MQ Consume rate + latency",
+        "tip": "Dual y-axis: service_mq_consume_count (left) + service_mq_consume_latency (right).",
         "type": "line",
-        "expressions": ["service_mq_consume_count"],
+        "expressions": [
+          "service_mq_consume_count",
+          "service_mq_consume_latency"
+        ],
+        "expressionLabels": ["count", "latency"],
+        "expressionUnits": ["/min", "ms"],
+        "expressionAxes": [0, 1],
         "visibleWhen": "service_mq_consume_count has value",
-        "span": 6,
-        "rowSpan": 2
-      },
-      {
-        "id": "mq_consume_latency",
-        "title": "MQ Avg Consuming Latency",
-        "tip": "service_mq_consume_latency — only shown when the service emits MQ metrics.",
-        "type": "line",
-        "unit": "ms",
-        "expressions": ["service_mq_consume_latency"],
-        "visibleWhen": "service_mq_consume_latency has value",
-        "span": 6,
+        "span": 3,
         "rowSpan": 2
       },
       {

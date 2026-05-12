@@ -36,6 +36,9 @@ interface TopGroup {
   /** MQE that produced this list — surfaced in the tab tooltip so the
    *  operator can copy/reuse the expression. */
   expression?: string;
+  /** Per-tab unit override. Falls back to the widget-level `unit` prop
+   *  when missing. Lets one widget mix rpm / ms / % across tabs. */
+  unit?: string;
   items: DashboardTopItem[];
 }
 
@@ -63,9 +66,9 @@ watch(effectiveGroups, (g) => {
   // Reset to first tab when the group set changes shape.
   if (activeIdx.value >= g.length) activeIdx.value = 0;
 });
-const activeItems = computed<DashboardTopItem[]>(
-  () => effectiveGroups.value[activeIdx.value]?.items ?? [],
-);
+const activeGroup = computed(() => effectiveGroups.value[activeIdx.value] ?? null);
+const activeItems = computed<DashboardTopItem[]>(() => activeGroup.value?.items ?? []);
+const activeUnit = computed<string | undefined>(() => activeGroup.value?.unit ?? props.unit);
 
 const max = computed(() => {
   let m = 0;
@@ -103,7 +106,7 @@ const showTabs = computed(() => effectiveGroups.value.length > 1);
         <span class="name">{{ it.name }}</span>
         <div class="bar"><div class="fill" :style="{ width: `${pct(it.value)}%`, background: color }" /></div>
         <span class="value">
-          {{ fmtMetric(it.value) }}<span v-if="unit" class="unit">{{ unit }}</span>
+          {{ fmtMetric(it.value) }}<span v-if="activeUnit" class="unit">{{ activeUnit }}</span>
         </span>
       </div>
       <p v-if="activeItems.length === 0" class="empty">No data</p>

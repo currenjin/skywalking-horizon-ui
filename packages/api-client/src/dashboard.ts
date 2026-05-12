@@ -62,6 +62,20 @@ export interface DashboardWidget {
    * to the expression text. Indices align with `expressions`.
    */
   expressionLabels?: string[];
+  /**
+   * Optional per-expression unit overrides. Used by `top` widgets
+   * where switching tabs changes the metric unit too (e.g. Traffic →
+   * rpm, Slow → ms, SR → %). Falls back to the widget-level `unit`
+   * when entries are missing. Indices align with `expressions`.
+   */
+  expressionUnits?: string[];
+  /**
+   * Optional y-axis index per expression (`0` = left, `1` = right).
+   * Lets a single `line` widget plot two metrics on separate scales —
+   * e.g. MQ consume count + latency. Defaults to 0 for every series
+   * when omitted. Indices align with `expressions`.
+   */
+  expressionAxes?: number[];
   /** Suffix unit (`%`, `ms`, `calls / min`). */
   unit?: string;
   /**
@@ -108,6 +122,12 @@ export interface DashboardConfig {
 export interface DashboardSeries {
   label: string;
   data: Array<number | null>;
+  /** `0` = left axis (default), `1` = right axis. Used by dual-axis
+   *  line widgets like "MQ count + latency". */
+  yAxisIndex?: number;
+  /** Optional axis unit hint — shown as a small label near the axis
+   *  when present. */
+  unit?: string;
 }
 
 export interface DashboardTopItem {
@@ -133,9 +153,14 @@ export interface DashboardWidgetResult {
   /** `top` payload — multi-expression results, one entry per
    *  `expressions[i]`. UI renders a switcher (one tab per group) and
    *  shows the active group's list. `expression` is echoed so the UI
-   *  can surface the MQE in the tab tooltip. Indices align with
-   *  `widget.expressions`. */
-  topGroups?: Array<{ label: string; expression: string; items: DashboardTopItem[] }>;
+   *  can surface the MQE in the tab tooltip; `unit` may override the
+   *  widget-level unit per tab. Indices align with `widget.expressions`. */
+  topGroups?: Array<{
+    label: string;
+    expression: string;
+    unit?: string;
+    items: DashboardTopItem[];
+  }>;
 }
 
 export interface DashboardResponse {

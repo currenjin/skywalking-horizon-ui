@@ -36,6 +36,9 @@ echarts.use([LineChart, GridComponent, LegendComponent, TooltipComponent, Canvas
 interface Series {
   label: string;
   data: Array<number | null>;
+  /** `0` = left axis (default), `1` = right axis. */
+  yAxisIndex?: number;
+  unit?: string;
 }
 
 const props = withDefaults(
@@ -117,7 +120,7 @@ function buildOption(): echarts.EChartsCoreOption {
     },
     grid: {
       left: 36,
-      right: 8,
+      right: props.series.some((s) => (s.yAxisIndex ?? 0) === 1) ? 32 : 8,
       top: props.series.length > 1 ? 22 : 8,
       bottom: 8,
       containLabel: false,
@@ -129,12 +132,36 @@ function buildOption(): echarts.EChartsCoreOption {
       axisLabel: { color: '#64748b', fontSize: 9, interval: Math.floor(length / 6) },
       splitLine: { show: false },
     },
-    yAxis: {
-      type: 'value',
-      axisLine: { show: false },
-      axisLabel: { color: '#64748b', fontSize: 9 },
-      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
-    },
+    /* Dual y-axis when any series asks for axis 1. Right axis label
+     * picks up the unit from the first series on that axis when set. */
+    yAxis: (() => {
+      const hasRight = props.series.some((s) => (s.yAxisIndex ?? 0) === 1);
+      const rightUnit = props.series.find((s) => (s.yAxisIndex ?? 0) === 1)?.unit;
+      const leftUnit = props.series.find((s) => (s.yAxisIndex ?? 0) === 0)?.unit ?? props.unit;
+      const axes: Record<string, unknown>[] = [
+        {
+          type: 'value',
+          name: leftUnit ?? '',
+          nameTextStyle: { color: '#64748b', fontSize: 9, padding: [0, 0, 0, 0] },
+          nameGap: 6,
+          axisLine: { show: false },
+          axisLabel: { color: '#64748b', fontSize: 9 },
+          splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
+        },
+      ];
+      if (hasRight) {
+        axes.push({
+          type: 'value',
+          name: rightUnit ?? '',
+          nameTextStyle: { color: '#64748b', fontSize: 9 },
+          nameGap: 6,
+          axisLine: { show: false },
+          axisLabel: { color: '#64748b', fontSize: 9 },
+          splitLine: { show: false },
+        });
+      }
+      return axes;
+    })(),
     series: props.series.map((s, i) => {
       // First series uses the widget's accent color (resolved from a
       // CSS var); secondary lines cycle through SECONDARY. Single-series
@@ -146,6 +173,7 @@ function buildOption(): echarts.EChartsCoreOption {
         type: 'line',
         smooth: true,
         symbol: 'none',
+        yAxisIndex: s.yAxisIndex ?? 0,
         lineStyle: { width: 1.5 },
         data: s.data.map((v) => (v === null ? '-' : v)),
         itemStyle: { color },
