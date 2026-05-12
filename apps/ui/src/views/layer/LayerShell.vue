@@ -30,9 +30,11 @@ import { computed } from 'vue';
 import { RouterLink, RouterView, useRoute } from 'vue-router';
 import type { LayerDef } from '@skywalking-horizon-ui/api-client';
 import Icon from '@/components/icons/Icon.vue';
+import LayerServiceSelector from './LayerServiceSelector.vue';
 import { metricMeta } from '@/composables/metricCatalog';
 import { useLayerLanding } from '@/composables/useLayerLanding';
 import { useLayers } from '@/composables/useLayers';
+import { useSelectedService } from '@/composables/useSelectedService';
 import { useSetupStore } from '@/stores/setup';
 import { fmtMetric } from '@/utils/formatters';
 
@@ -69,6 +71,11 @@ const safeCfg = computed(() => cfg.value?.landing ?? {
 });
 const landing = useLayerLanding(safeLayer, safeCfg);
 const aggregates = computed(() => landing.data.value?.aggregates ?? null);
+
+// Page-wide selected service — URL-backed, shared with every tab body.
+const { selectedId, setSelected } = useSelectedService();
+const sampledServices = computed(() => landing.data.value?.sampledRows ?? landing.rows.value ?? []);
+const selectorColumns = computed(() => safeCfg.value.columns);
 
 // ── Header identity ──────────────────────────────────────────────────
 function initialsFor(name: string): string {
@@ -215,6 +222,14 @@ const sourceText = computed(() => {
     </div>
 
     <div v-if="layer" class="tab-body">
+      <LayerServiceSelector
+        v-if="sampledServices.length > 0"
+        :services="sampledServices"
+        :columns="selectorColumns"
+        :selected-id="selectedId"
+        :accent="layer.color"
+        @select="setSelected"
+      />
       <RouterView />
     </div>
   </div>

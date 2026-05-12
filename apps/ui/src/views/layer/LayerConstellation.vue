@@ -40,12 +40,15 @@ const props = withDefaults(
     errAt?: number;
     /** SVG viewBox edge in px. */
     size?: number;
+    /** Service id to visually emphasize (matches layer-wide selection). */
+    selectedId?: string | null;
   }>(),
   {
     errorMetric: 'err',
     warnAt: 0.5,
     errAt: 1,
     size: 400,
+    selectedId: null,
   },
 );
 const emit = defineEmits<{ (e: 'pick', s: LandingServiceRow): void }>();
@@ -145,10 +148,26 @@ function textAnchorFor(angle: number): 'start' | 'end' | 'middle' {
         opacity="0.6"
       />
       <!-- dots -->
-      <g v-for="(d, i) in dots" :key="`d-${i}`" class="dot-group" @click="emit('pick', d)">
+      <g
+        v-for="(d, i) in dots"
+        :key="`d-${i}`"
+        class="dot-group"
+        :class="{ active: d.serviceId === selectedId }"
+        @click="emit('pick', d)"
+      >
         <title>{{ d.serviceName }} · traffic {{ d.traffic.toFixed(1) }}{{ d.err !== null ? ` · err ${d.err.toFixed(2)}` : '' }}</title>
+        <!-- Selection ring — visible only on the active dot. -->
+        <circle
+          v-if="d.serviceId === selectedId"
+          :cx="d.x"
+          :cy="d.y"
+          :r="d.halo + 4"
+          fill="none"
+          stroke="var(--sw-accent)"
+          stroke-width="1.5"
+        />
         <circle :cx="d.x" :cy="d.y" :r="d.halo" :fill="colorFor(d.status)" opacity="0.22" />
-        <circle :cx="d.x" :cy="d.y" :r="3.5" :fill="colorFor(d.status)" />
+        <circle :cx="d.x" :cy="d.y" :r="d.serviceId === selectedId ? 4.5 : 3.5" :fill="colorFor(d.status)" />
         <text
           :x="d.x + Math.cos(d.angle) * 14"
           :y="d.y + Math.sin(d.angle) * 14 + 3"
@@ -214,6 +233,10 @@ svg {
 .dot-group:hover .label {
   fill: var(--sw-fg-0);
   font-weight: 600;
+}
+.dot-group.active .label {
+  fill: var(--sw-accent-2);
+  font-weight: 700;
 }
 .legend {
   display: grid;

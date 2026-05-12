@@ -48,13 +48,18 @@ function layerRoute(): RouteRecordRaw {
     children: [
       // Bare /layer/:layerKey lands on Services — the default entry.
       { path: '', redirect: (to) => ({ path: `/layer/${to.params.layerKey}/services` }) },
-      // Services list — live constellation + top-N table.
+      // Services list — live constellation + sortable table. Selected
+      // service rides on `?service=<id>` in the URL (single source of
+      // truth across all tabs); the selector zone in LayerShell pins it.
       { path: 'services', component: () => import('@/views/layer/LayerServicesView.vue') },
-      // Service detail — KPIs scoped to one service. Component lazily
-      // loaded so the chunk doesn't bloat the layer-shell entry.
+      // Legacy route — redirect to query-string form so old bookmarks
+      // keep working.
       {
         path: 'services/:serviceId',
-        component: () => import('@/views/layer/LayerServiceDetailView.vue'),
+        redirect: (to) => ({
+          path: `/layer/${to.params.layerKey}/services`,
+          query: { service: String(to.params.serviceId) },
+        }),
       },
       ...placeholderTabs.map<RouteRecordRaw>((f) => ({
         path: f.path,
