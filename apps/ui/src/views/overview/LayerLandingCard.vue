@@ -15,18 +15,31 @@
   limitations under the License.
 -->
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, toRef } from 'vue';
 import { RouterLink } from 'vue-router';
 import type { LayerDef } from '@skywalking-horizon-ui/api-client';
 import Icon from '@/components/icons/Icon.vue';
 import { metricMeta } from '@/composables/metricCatalog';
+import { useLayerLanding } from '@/composables/useLayerLanding';
 import { useSetupStore } from '@/stores/setup';
+import { fmtMetric } from '@/utils/formatters';
 
 const props = defineProps<{ layer: LayerDef }>();
 const store = useSetupStore();
 const cfg = computed(() => store.ensure(props.layer.key, { slots: props.layer.slots, caps: props.layer.caps }));
 const slotName = computed(() => cfg.value.slots.services ?? 'Services');
 const detailHref = computed(() => `/layer/${props.layer.key}/services`);
+
+// Live top-N rollup — see useLayerLanding for the polling cadence.
+const landingCfg = computed(() => cfg.value.landing);
+const layerRef = toRef(props, 'layer');
+const landing = useLayerLanding(layerRef, landingCfg);
+const hasRows = computed(() => landing.rows.value.length > 0);
+const placeholderCount = computed(() =>
+  Math.max(0, cfg.value.landing.topN - landing.rows.value.length),
+);
+const serviceHref = (serviceId: string): string =>
+  `/layer/${props.layer.key}/services/${encodeURIComponent(serviceId)}`;
 </script>
 
 <template>
@@ -74,22 +87,51 @@ const detailHref = computed(() => `/layer/${props.layer.key}/services`);
           </tr>
         </thead>
         <tbody>
-          <tr v-for="i in cfg.landing.topN" :key="i" class="placeholder-row">
+          <tr v-for="row in landing.rows.value" :key="row.serviceId" class="data-row">
+            <td class="svc-col" :title="row.serviceName">
+              <RouterLink :to="serviceHref(row.serviceId)">{{ row.shortName || row.serviceName }}</RouterLink>
+            </td>
+            <td
+              v-for="c in cfg.landing.columns"
+              :key="c.metric"
+              class="num"
+              :class="{ muted: row.metrics[c.metric] == null }"
+            >
+              {{ fmtMetric(row.metrics[c.metric]) }}
+            </td>
+            <td v-if="cfg.landing.spark" class="spark-col muted">—</td>
+          </tr>
+          <tr
+            v-for="i in placeholderCount"
+            :key="`ph-${i}`"
+            class="placeholder-row"
+          >
             <td class="svc-col">
-              <span class="shim w-name" />
+              <span v-if="landing.isLoading.value && !hasRows" class="shim w-name" />
+              <span v-else class="empty-cell">—</span>
             </td>
             <td v-for="c in cfg.landing.columns" :key="c.metric" class="num">
-              <span class="shim w-num" />
+              <span v-if="landing.isLoading.value && !hasRows" class="shim w-num" />
+              <span v-else class="empty-cell">—</span>
             </td>
             <td v-if="cfg.landing.spark" class="spark-col">
-              <span class="shim w-spark" />
+              <span v-if="landing.isLoading.value && !hasRows" class="shim w-spark" />
+              <span v-else class="empty-cell">—</span>
             </td>
           </tr>
         </tbody>
       </table>
       <div class="card-foot">
-        <span class="placeholder-note">
-          Live service data lands in Stage 2.4 — <RouterLink to="/setup">customize this card</RouterLink>.
+        <span v-if="landing.error.value" class="err-note" :title="landing.error.value">
+          OAP unreachable — showing last known data.
+        </span>
+        <span v-else-if="!hasRows && !landing.isLoading.value" class="placeholder-note">
+          No services reporting on this layer yet —
+          <RouterLink to="/setup">customize this card</RouterLink>.
+        </span>
+        <span v-else class="placeholder-note">
+          Sparkline + live trend land in Stage 2.6b —
+          <RouterLink to="/setup">customize this card</RouterLink>.
         </span>
       </div>
     </div>
@@ -179,6 +221,25 @@ td.num {
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
+.data-row .svc-col a {
+  color: var(--sw-fg-0);
+  text-decoration: none;
+  display: inline-block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+.data-row .svc-col a:hover {
+  color: var(--sw-accent-2);
+}
+.num.muted {
+  color: var(--sw-fg-3);
+}
+.empty-cell {
+  color: var(--sw-fg-3);
+}
 .placeholder-row .shim {
   display: inline-block;
   height: 9px;
@@ -204,5 +265,8 @@ td.num {
 .placeholder-note a {
   color: var(--sw-accent-2);
   text-decoration: none;
+}
+.err-note {
+  color: var(--sw-warn);
 }
 </style>

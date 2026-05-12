@@ -22,6 +22,7 @@ import { registerAuthRoutes } from './auth/routes.js';
 import { SessionStore } from './auth/sessions.js';
 import { loadConfig, type ConfigSource } from './config/loader.js';
 import { registerOapInfoRoute } from './oap/info-routes.js';
+import { registerLandingRoute } from './oap/landing-routes.js';
 import { registerMenuRoute } from './oap/menu-routes.js';
 import { registerOapRoutes } from './oap/routes.js';
 import { registerPreflightRoutes } from './oap/preflight-routes.js';
@@ -61,6 +62,7 @@ app.addContentTypeParser('text/plain', { parseAs: 'string' }, (_req, body, done)
 registerAuthRoutes(app, source, sessions, audit);
 registerOapInfoRoute(app, { config: source, sessions });
 registerMenuRoute(app, { config: source, sessions });
+registerLandingRoute(app, { config: source, sessions });
 registerSetupRoutes(app, { config: source, sessions, audit, store: setupStore });
 registerOapRoutes(app, { config: source, sessions, audit });
 registerPreflightRoutes(app, { config: source, sessions });
