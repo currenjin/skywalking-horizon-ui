@@ -256,6 +256,47 @@ function deleteMetricColumn(i: number): void {
 }
 
 /**
+ * Scope-aware `visibleWhen` placeholder + hover hint. Two supported
+ * predicate forms:
+ *
+ *   <metric> has value     The SPA evaluates this against the widget's
+ *                          own MQE result. If at least one bucket is
+ *                          non-null, the widget renders. Useful when
+ *                          the metric only exists for some services
+ *                          (e.g. service_mq_consume_count only on MQ
+ *                          producers).
+ *
+ *   #entity.<attr>         The SPA evaluates this against the *entity's*
+ *                          attributes. Only meaningful on scopes where
+ *                          entities carry attributes — i.e. INSTANCE
+ *                          (jvm / language / host etc.) and to a lesser
+ *                          extent ENDPOINT. Service-scope entities
+ *                          don't expose attributes, so the predicate is
+ *                          a no-op there.
+ *
+ * The placeholder / tooltip swap so operators editing an instance
+ * widget see entity-attribute syntax, and service-widget operators see
+ * the metric-has-value form.
+ */
+function visibleWhenPlaceholder(scope: DashboardScope): string {
+  if (scope === 'instance') return "#entity.jvm   or   instance_jvm_cpu has value";
+  if (scope === 'endpoint') return 'endpoint_cpm has value';
+  return 'service_mq_consume_count has value';
+}
+function visibleWhenHint(scope: DashboardScope): string {
+  const common =
+    'Hide the widget unless this predicate is truthy.\n' +
+    '\n' +
+    "  <metric> has value   — the widget's own MQE returned non-null data.";
+  const entityHint =
+    '\n  #entity.<attr>       — the active entity has the named attribute (e.g. #entity.jvm,\n' +
+    '                         #entity.language). Only meaningful for instance / endpoint scopes;\n' +
+    "                         service-scope entities don't carry attributes.";
+  if (scope === 'instance' || scope === 'endpoint') return common + entityHint;
+  return common + '\n  (#entity.* predicates are entity-attribute-based and apply best on Instance scope.)';
+}
+
+/**
  * Component toggles surfaced in the admin editor. Each entry binds to
  * a key on the template's `components` block; flipping the toggle
  * shows / hides the matching sidebar entry + per-layer route.
@@ -493,22 +534,6 @@ function toggleComponent(key: ComponentKey): void {
           <ul v-else class="widget-list">
             <li v-for="(w, i) in currentWidgets" :key="i" class="widget-edit">
               <div class="we-row">
-                <div class="we-handle">
-                  <button
-                    class="sw-btn ghost small"
-                    type="button"
-                    :disabled="i === 0"
-                    title="Move up"
-                    @click="moveWidget(i, -1)"
-                  >↑</button>
-                  <button
-                    class="sw-btn ghost small"
-                    type="button"
-                    :disabled="i === currentWidgets.length - 1"
-                    title="Move down"
-                    @click="moveWidget(i, 1)"
-                  >↓</button>
-                </div>
                 <div class="we-fields">
                   <div class="row">
                     <label>
@@ -524,6 +549,7 @@ function toggleComponent(key: ComponentKey): void {
                       <select v-model="w.type">
                         <option value="card">card</option>
                         <option value="line">line</option>
+                        <option value="top">top</option>
                       </select>
                     </label>
                     <label>
@@ -540,12 +566,15 @@ function toggleComponent(key: ComponentKey): void {
                     </label>
                   </div>
                   <div class="row">
-                    <label class="grow wide">
+                    <label
+                      class="grow wide"
+                      :title="visibleWhenHint(activeScope)"
+                    >
                       <span>Visible when (optional)</span>
                       <input
                         class="mono"
                         v-model="w.visibleWhen"
-                        placeholder="#entity.jvm   or   service_jvm_cpu has value"
+                        :placeholder="visibleWhenPlaceholder(activeScope)"
                       />
                     </label>
                   </div>
@@ -561,9 +590,31 @@ function toggleComponent(key: ComponentKey): void {
                     </label>
                   </div>
                 </div>
-                <button class="sw-btn danger" type="button" title="Delete" @click="deleteWidget(i)">
-                  ✕
-                </button>
+                <!-- All three row controls live in a single vertical
+                     stack on the right edge so up/down/✕ stay aligned
+                     regardless of how many field rows are below. -->
+                <div class="we-controls">
+                  <button
+                    class="sw-btn ghost small"
+                    type="button"
+                    :disabled="i === 0"
+                    title="Move up"
+                    @click="moveWidget(i, -1)"
+                  >↑</button>
+                  <button
+                    class="sw-btn ghost small"
+                    type="button"
+                    :disabled="i === currentWidgets.length - 1"
+                    title="Move down"
+                    @click="moveWidget(i, 1)"
+                  >↓</button>
+                  <button
+                    class="sw-btn danger"
+                    type="button"
+                    title="Delete"
+                    @click="deleteWidget(i)"
+                  >✕</button>
+                </div>
               </div>
             </li>
           </ul>
@@ -968,17 +1019,27 @@ function toggleComponent(key: ComponentKey): void {
   gap: 10px;
   padding: 12px 16px;
 }
-.we-handle {
+.we-controls {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding-top: 18px;
+  align-self: flex-start;
+  /* Push down so the top button aligns with the FIRST input row,
+   * skipping the field labels above. Label is ~13.5px + 3px gap. */
+  padding-top: 17px;
 }
-.we-handle .sw-btn {
-  width: 24px;
-  height: 22px;
+.we-controls .sw-btn {
+  width: 28px;
+  height: 24px;
   padding: 0;
-  font-size: 10px;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.we-controls .sw-btn[disabled] {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 .we-fields {
   flex: 1;
@@ -1031,15 +1092,17 @@ function toggleComponent(key: ComponentKey): void {
   border-color: var(--sw-accent-line);
 }
 .sw-btn.danger {
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  font-size: 11px;
-  margin-top: 18px;
   border-color: rgba(239, 68, 68, 0.3);
   color: #f87171;
 }
 .sw-btn.danger:hover {
   background: var(--sw-err-soft);
+}
+.we-controls .sw-btn.danger {
+  /* Sized through .we-controls .sw-btn — no width/height override. */
+  margin-top: 4px;
+  border-top: 1px solid var(--sw-line);
+  padding-top: 0;
+  border-radius: 4px;
 }
 </style>
