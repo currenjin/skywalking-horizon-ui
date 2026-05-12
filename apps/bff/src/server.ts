@@ -16,9 +16,12 @@
  */
 
 import Fastify from 'fastify';
+import cookie from '@fastify/cookie';
+import { registerAuthRoutes } from './auth/routes.js';
+import { SessionStore } from './auth/sessions.js';
 import { loadConfig, type ConfigSource } from './config/loader.js';
 import { HttpError } from './errors.js';
-import { logger } from './logger.js';
+import { logger, loggerOptions } from './logger.js';
 
 const configPath = process.env.HORIZON_CONFIG ?? './horizon.yaml';
 
@@ -26,7 +29,7 @@ const source: ConfigSource = loadConfig(configPath);
 logger.info({ configPath: source.path }, 'config loaded');
 source.onChange((cfg) => logger.info({ users: cfg.auth.local.users.length }, 'config reloaded'));
 
-const app = Fastify({ loggerInstance: logger });
+const app = Fastify({ logger: loggerOptions });
 
 app.setErrorHandler((err, _req, reply) => {
   if (err instanceof HttpError) {
@@ -37,9 +40,16 @@ app.setErrorHandler((err, _req, reply) => {
   return reply.status(500).send({ code: 'internal_error', message });
 });
 
+const sessions = new SessionStore({ ttlMinutes: source.current.session.ttlMinutes });
+
+await app.register(cookie);
+
+registerAuthRoutes(app, source, sessions);
+
 app.get('/api/health', async () => ({
   status: 'ok',
   version: process.env.HORIZON_VERSION ?? '0.1.0',
+  sessions: sessions.size(),
 }));
 
 const { host, port } = source.current.server;
@@ -54,6 +64,7 @@ app.listen({ host, port }).then(
 async function shutdown(signal: string) {
   logger.info({ signal }, 'shutting down');
   await app.close();
+  await sessions.close();
   await source.close();
   process.exit(0);
 }

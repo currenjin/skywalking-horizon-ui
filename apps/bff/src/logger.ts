@@ -15,11 +15,11 @@
  * limitations under the License.
  */
 
-import pino from 'pino';
+import pino, { type LoggerOptions } from 'pino';
 
 const isDev = process.env.NODE_ENV !== 'production';
 
-export const logger = pino({
+export const loggerOptions: LoggerOptions = {
   level: process.env.LOG_LEVEL ?? (isDev ? 'debug' : 'info'),
   ...(isDev
     ? {
@@ -33,4 +33,6 @@ export const logger = pino({
         },
       }
     : {}),
-});
+};
+
+export const logger = pino(loggerOptions);
