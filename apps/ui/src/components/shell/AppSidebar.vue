@@ -43,20 +43,64 @@ interface NavRow {
   badge?: { text: string; kind?: 'ok' | 'warn' | 'err' | 'info' };
 }
 
-// Operate = OAP runtime operations (vantage-parity) + alarms.
-// Trace search is per-layer (lives under /layer/:key/traces) so it's NOT here.
-const operate: NavRow[] = [
-  { icon: 'alert', label: 'Alarms', to: '/operate/alarms', badge: { text: '7', kind: 'err' } },
-  { icon: 'svc', label: 'Cluster status', to: '/operate/cluster' },
-  { icon: 'set', label: 'DSL catalog', to: '/operate/dsl' },
-  { icon: 'metric', label: 'Inspect', to: '/operate/inspect' },
-  { icon: 'flame', label: 'Live debug', to: '/operate/live-debug' },
-  { icon: 'trace', label: 'OAL viewer', to: '/operate/oal' },
-  { icon: 'download', label: 'Dump', to: '/operate/dump' },
-];
-const admin: NavRow[] = [
-  { icon: 'user', label: 'Users', to: '/admin/users' },
-  { icon: 'set', label: 'Roles', to: '/admin/roles' },
+interface NavSection {
+  kicker: string;
+  links: NavRow[];
+}
+
+// One leading row before the Layers block — the cross-layer landing.
+const overview: NavRow = { icon: 'dash', label: 'Overview', to: '/' };
+
+// Vantage-style flat kickers for the Operate / Admin half of the sidebar.
+// Alarms is user-facing so it sits before the Operate block (between user
+// observability concerns and OAP operator concerns).
+const sections: NavSection[] = [
+  {
+    kicker: 'Alerts',
+    links: [{ icon: 'alert', label: 'Alarms', to: '/alarms', badge: { text: '7', kind: 'err' } }],
+  },
+  {
+    kicker: 'Marketplace',
+    links: [{ icon: 'metric', label: 'All dashboards', to: '/operate/marketplace' }],
+  },
+  {
+    kicker: 'Cluster',
+    links: [{ icon: 'svc', label: 'Cluster status', to: '/operate/cluster' }],
+  },
+  {
+    kicker: 'DSL Management',
+    links: [
+      { icon: 'set', label: 'MAL · OTEL', to: '/operate/dsl/otel-rules' },
+      { icon: 'set', label: 'MAL · Telegraf', to: '/operate/dsl/telegraf-rules' },
+      { icon: 'set', label: 'LAL', to: '/operate/dsl/lal' },
+      // log-mal-rules = MAL applied to LAL-derived logs; the data flow reads
+      // LAL → MAL so the label says so.
+      { icon: 'set', label: 'LAL → MAL', to: '/operate/dsl/log-mal-rules' },
+      { icon: 'trace', label: 'OAL · read-only', to: '/operate/oal' },
+    ],
+  },
+  {
+    kicker: 'Inspect',
+    links: [{ icon: 'metric', label: 'Inspect', to: '/operate/inspect' }],
+  },
+  {
+    kicker: 'Live debugger',
+    links: [
+      { icon: 'flame', label: 'Live debugger', to: '/operate/live-debug' },
+      { icon: 'event', label: 'Capture history', to: '/operate/live-debug/history' },
+    ],
+  },
+  {
+    kicker: 'Dump',
+    links: [{ icon: 'download', label: 'Dump & restore', to: '/operate/dump' }],
+  },
+  {
+    kicker: 'Admin',
+    links: [
+      { icon: 'user', label: 'Users', to: '/admin/users' },
+      { icon: 'set', label: 'Roles', to: '/admin/roles' },
+    ],
+  },
 ];
 </script>
 
@@ -68,6 +112,14 @@ const admin: NavRow[] = [
     </RouterLink>
 
     <nav class="sw-nav">
+      <RouterLink
+        :to="overview.to"
+        class="sw-nav-item lead"
+        :class="{ 'is-active': route.path === overview.to }"
+      >
+        <Icon :name="overview.icon" /><span>{{ overview.label }}</span>
+      </RouterLink>
+
       <div class="sw-nav-section sw-row" style="justify-content: space-between">
         <span>Layers</span>
         <span style="color: var(--sw-fg-3); font-weight: 400">{{ LAYERS.length }} layers</span>
@@ -172,30 +224,21 @@ const admin: NavRow[] = [
         </div>
       </template>
 
-      <div class="sw-nav-section">Operate</div>
-      <RouterLink
-        v-for="row in operate"
-        :key="row.to"
-        :to="row.to"
-        class="sw-nav-item"
-        :class="{ 'is-active': isActive(row.to) }"
-      >
-        <Icon :name="row.icon" /><span>{{ row.label }}</span>
-        <span v-if="row.badge" class="sw-badge" :class="row.badge.kind" style="margin-left: auto">
-          {{ row.badge.text }}
-        </span>
-      </RouterLink>
-
-      <div class="sw-nav-section">Admin</div>
-      <RouterLink
-        v-for="row in admin"
-        :key="row.to"
-        :to="row.to"
-        class="sw-nav-item"
-        :class="{ 'is-active': isActive(row.to) }"
-      >
-        <Icon :name="row.icon" /><span>{{ row.label }}</span>
-      </RouterLink>
+      <template v-for="sec in sections" :key="sec.kicker">
+        <div class="sw-nav-section">{{ sec.kicker }}</div>
+        <RouterLink
+          v-for="row in sec.links"
+          :key="row.to"
+          :to="row.to"
+          class="sw-nav-item"
+          :class="{ 'is-active': isActive(row.to) }"
+        >
+          <Icon :name="row.icon" /><span>{{ row.label }}</span>
+          <span v-if="row.badge" class="sw-badge" :class="row.badge.kind" style="margin-left: auto">
+            {{ row.badge.text }}
+          </span>
+        </RouterLink>
+      </template>
     </nav>
 
     <div class="sw-side-foot">
@@ -273,5 +316,8 @@ const admin: NavRow[] = [
 }
 .sw-nav-item {
   text-decoration: none;
+}
+.sw-nav-item.lead {
+  margin-top: 4px;
 }
 </style>

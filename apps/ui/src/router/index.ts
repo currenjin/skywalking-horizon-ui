@@ -85,16 +85,24 @@ function layerSubRoutes(): RouteRecordRaw[] {
 const shellRoutes: RouteRecordRaw[] = [
   { path: '', name: 'home', component: () => import('@/views/landing/LandingView.vue') },
   ...layerSubRoutes(),
-  // Operate (vantage-parity) — OAP runtime operations
-  { path: 'operate/alarms', component: placeholder, props: { title: 'Alarms', phase: 'Phase 5', note: 'Read-only; recovery is backend-auto. Live debug card via admin REST.' } },
+  // Alerts (user-facing — alarms are observability data, not operator-only)
+  { path: 'alarms', component: placeholder, props: { title: 'Alarms', phase: 'Phase 5', note: 'Read-only; recovery is backend-auto. Live debug card via admin REST.' } },
+  // Marketplace — all dashboards / templates across layers
+  { path: 'operate/marketplace', component: placeholder, props: { title: 'Marketplace', phase: 'Phase 2', note: 'All dashboard templates browse + clone + customize.' } },
+  // Cluster
   { path: 'operate/cluster', component: placeholder, props: { title: 'Cluster status', phase: 'Phase 6 / 7', note: 'Module activity matrix · storage health · receiver activity · effective config tree · TTL grid.' } },
-  { path: 'operate/dsl', component: placeholder, props: { title: 'DSL catalog', phase: 'Phase 6', note: 'MAL / LAL rule catalog + Monaco editor with diff and revert-to-bundled.' } },
-  { path: 'operate/dsl/:catalog/:name', component: placeholder, props: (r) => ({ title: `Edit · ${r.params.name}`, phase: 'Phase 6' }) },
+  // DSL Management
+  { path: 'operate/dsl/:catalog(otel-rules|telegraf-rules|lal|log-mal-rules)', component: placeholder, props: (r) => ({ title: `DSL · ${r.params.catalog}`, phase: 'Phase 6', note: 'Rule catalog grid + filter + new-rule form. Click a rule to open the editor.' }) },
+  { path: 'operate/dsl/:catalog(otel-rules|telegraf-rules|lal|log-mal-rules)/:name', component: placeholder, props: (r) => ({ title: `Edit · ${r.params.name}`, phase: 'Phase 6', note: 'Monaco YAML + diff vs server + diff vs bundled + destructive-confirm.' }) },
+  { path: 'operate/oal', component: placeholder, props: { title: 'OAL · read-only', phase: 'Phase 6', note: 'Line-numbered OAL files with jump-to-debugger on each rule.' } },
+  // Inspect
   { path: 'operate/inspect', component: placeholder, props: { title: 'Inspect', phase: 'Phase 6', note: 'OAP metric catalog browse + MQE ad-hoc charts with rule attribution.' } },
-  { path: 'operate/live-debug/:tab(mal|lal|oal)?', component: placeholder, props: (r) => ({ title: `Live debug · ${r.params.tab ?? 'mal'}`, phase: 'Phase 6' }) },
-  { path: 'operate/oal', component: placeholder, props: { title: 'OAL viewer', phase: 'Phase 6', note: 'Read-only OAL files with line-numbered syntax highlighting.' } },
-  { path: 'operate/dump', component: placeholder, props: { title: 'Dump', phase: 'Phase 6', note: 'Stream OAP runtime-rule dump as tar.gz.' } },
-  // Admin (users + roles only; no audit log UI — BFF JSONL is server-side forensic only)
+  // Live debugger
+  { path: 'operate/live-debug/:tab(mal|lal|oal)?', component: placeholder, props: (r) => ({ title: `Live debugger · ${r.params.tab ?? 'mal'}`, phase: 'Phase 6' }) },
+  { path: 'operate/live-debug/history', component: placeholder, props: { title: 'Capture history', phase: 'Phase 6', note: 'Local-only history of finished capture sessions.' } },
+  // Dump
+  { path: 'operate/dump', component: placeholder, props: { title: 'Dump & restore', phase: 'Phase 6', note: 'Stream OAP runtime-rule dump as tar.gz. Restore is deferred (no OAP endpoint yet).' } },
+  // Admin
   { path: 'admin/users', component: placeholder, props: { title: 'Users', phase: 'Phase 7' } },
   { path: 'admin/roles', component: placeholder, props: { title: 'Roles & permissions', phase: 'Phase 7' } },
 ];
