@@ -27,20 +27,44 @@
 -->
 <script setup lang="ts">
 import { computed } from 'vue';
-import { useRoute, RouterLink } from 'vue-router';
+import { useRoute } from 'vue-router';
+import type { LayerDef } from '@skywalking-horizon-ui/api-client';
 import TimeChart from '@/components/charts/TimeChart.vue';
-import {
-  useLayerDashboard,
-  useLayerDashboardConfig,
-} from '@/composables/useLayerDashboard';
+import { useLayerDashboard, useLayerDashboardConfig } from '@/composables/useLayerDashboard';
+import { useLayerLanding } from '@/composables/useLayerLanding';
+import { useLayers } from '@/composables/useLayers';
 import { useSelectedService } from '@/composables/useSelectedService';
+import { useSetupStore } from '@/stores/setup';
 import { fmtMetric } from '@/utils/formatters';
 
 const route = useRoute();
 const layerKey = computed(() => String(route.params.layerKey ?? ''));
 const { selectedId } = useSelectedService();
+const { layers } = useLayers();
+const layer = computed<LayerDef | null>(() => layers.value.find((l) => l.key === layerKey.value) ?? null);
+
+// Look up the service NAME from landing data — selectedId is the
+// base64 OAP service id, which MQE doesn't accept; MQE entities are
+// keyed by serviceName. We share the landing query with the rest of
+// the per-layer page so this is free (cached by vue-query).
+const store = useSetupStore();
+const safeLayer = computed<LayerDef>(() => layer.value ?? {
+  key: layerKey.value, name: layerKey.value, color: 'var(--sw-fg-2)',
+  serviceCount: -1, active: false, level: null, slots: {}, caps: {},
+});
+const safeCfg = computed(() => {
+  if (!layer.value) return { priority: 99, topN: 5, orderBy: 'cpm', columns: [], style: 'table' as const };
+  return store.ensure(layer.value.key, { slots: layer.value.slots, caps: layer.value.caps }).landing;
+});
+const landing = useLayerLanding(safeLayer, safeCfg);
+const serviceName = computed<string | null>(() => {
+  const rows = landing.data.value?.sampledRows ?? landing.rows.value ?? [];
+  const match = rows.find((r) => r.serviceId === selectedId.value);
+  return match?.serviceName ?? null;
+});
+
 const { config, isLoading: configLoading } = useLayerDashboardConfig(layerKey);
-const { data, isFetching, error } = useLayerDashboard(layerKey, selectedId);
+const { data, isFetching, error } = useLayerDashboard(layerKey, serviceName);
 
 const widgets = computed(() => config.value?.widgets ?? []);
 const resultsById = computed(() => {
@@ -48,26 +72,18 @@ const resultsById = computed(() => {
   for (const r of data.value?.widgets ?? []) out.set(r.id, r);
   return out;
 });
-const serviceText = computed(() => data.value?.service ?? selectedId.value ?? '(auto)');
 const reachable = computed(() => data.value?.reachable !== false);
 const errorText = computed(() => data.value?.error ?? (error.value ? String(error.value) : null));
+const headerTitle = computed(() => serviceName.value ?? data.value?.service ?? 'Pick a service');
 </script>
 
 <template>
   <div class="dash-tab">
     <header class="dash-head">
-      <div>
-        <div class="kicker">Service</div>
-        <h2>{{ widgets.length }} widget{{ widgets.length === 1 ? '' : 's' }}</h2>
-        <p class="sub">
-          MQE scoped to <code>{{ serviceText }}</code>.
-          Refreshes every 60s. <RouterLink to="/admin/layer-dashboards">Customize widgets</RouterLink>.
-        </p>
-      </div>
+      <h2 class="svc-title">{{ headerTitle }}</h2>
       <div class="state">
         <span v-if="isFetching" class="badge fetch">refreshing</span>
         <span v-else-if="!reachable" class="badge err">OAP unreachable</span>
-        <span v-else class="badge ok">live</span>
       </div>
     </header>
 
@@ -130,38 +146,16 @@ const errorText = computed(() => data.value?.error ?? (error.value ? String(erro
 }
 .dash-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
 }
-.kicker {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--sw-accent);
-}
-.dash-head h2 {
-  margin: 2px 0 4px;
-  font-size: 15px;
+.svc-title {
+  margin: 0;
+  font-size: 14px;
   font-weight: 600;
   color: var(--sw-fg-0);
-  letter-spacing: -0.01em;
-}
-.dash-head .sub {
-  margin: 0;
-  font-size: 11px;
-  color: var(--sw-fg-2);
-  line-height: 1.5;
-}
-.dash-head .sub code {
   font-family: var(--sw-mono);
-  font-size: 10.5px;
-  background: var(--sw-bg-2);
-  padding: 1px 4px;
-  border-radius: 3px;
-}
-.dash-head .sub a {
-  color: var(--sw-accent-2);
-  text-decoration: none;
+  letter-spacing: -0.01em;
 }
 .state {
   margin-left: auto;

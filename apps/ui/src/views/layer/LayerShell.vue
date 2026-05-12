@@ -129,12 +129,10 @@ interface HeaderKpi {
   spark?: Array<number | null>;
 }
 /**
- * Header KPIs scope to the *selected service*. Falls back to the
- * layer-wide aggregates when no service is selectable (e.g. before
- * data loads). The per-service sparkline comes from `row.spark` when
- * present; otherwise falls through to the layer-wide
- * `seriesByMetric[col.metric]` so the trend area never goes blank just
- * because the BFF only built one spark series.
+ * Header KPIs are layer-wide aggregates — sum or avg across the topN
+ * services per the operator's setup config. The Switch button below
+ * carries the *selected service* context for the widget grid; the
+ * header summary is the layer rollup.
  */
 const headerKpis = computed<HeaderKpi[]>(() => {
   const L = layer.value;
@@ -142,33 +140,20 @@ const headerKpis = computed<HeaderKpi[]>(() => {
   const c = cfg.value;
   if (!c) return [];
   const a = aggregates.value;
-  const row = selectedRow.value;
   const out: HeaderKpi[] = [];
   for (const col of c.landing.columns.slice(0, 5)) {
     const m = metricMeta(col.metric);
-    const value = row ? row.metrics[col.metric] ?? null : a?.metrics?.[col.metric] ?? null;
     out.push({
       label: col.label || m.label,
-      value,
+      value: a?.metrics?.[col.metric] ?? null,
       unit: col.unit || m.unit,
       color: colorForMetric(col.metric),
-      // Prefer the selected service's spark; otherwise reuse the
-      // layer-aggregate series.
-      spark:
-        row?.spark && row.spark.length > 1
-          ? row.spark
-          : a?.seriesByMetric?.[col.metric],
+      spark: a?.seriesByMetric?.[col.metric],
     });
   }
   return out;
 });
 
-// Source/level chip text (mirrors design's "from Java agent · OAP v10.3").
-const sourceText = computed(() => {
-  if (!layer.value) return '';
-  const lvl = layer.value.level;
-  return lvl !== null && lvl !== undefined ? `OAP layer · level ${lvl}` : 'OAP layer';
-});
 </script>
 
 <template>
@@ -180,8 +165,6 @@ const sourceText = computed(() => {
         <div class="identity-text">
           <div class="title-row">
             <h1>{{ displayName }}</h1>
-            <span class="sw-tag layer-tag">LAYER</span>
-            <span class="sw-tag">{{ sourceText }}</span>
             <span v-if="layer.serviceCount === 0" class="sw-badge warn">no services</span>
             <span v-else-if="!layer.active" class="sw-badge">no data</span>
           </div>
