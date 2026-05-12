@@ -15,6 +15,10 @@
  * limitations under the License.
  */
 
+import type { MenuResponse } from '@skywalking-horizon-ui/api-client';
+
+export type { MenuResponse, LayerDef, LayerCaps, LayerSlots } from '@skywalking-horizon-ui/api-client';
+
 export interface MeResponse {
   username: string;
   roles: string[];
@@ -84,6 +88,11 @@ export class BffClient {
 
   me(): Promise<MeResponse> {
     return this.request<MeResponse>('GET', '/api/auth/me');
+  }
+
+  // ── menu / layers ────────────────────────────────────────────────────
+  menu(): Promise<MenuResponse> {
+    return this.request<MenuResponse>('GET', '/api/menu');
   }
 
   // ── cluster / preflight ──────────────────────────────────────────────

@@ -15,12 +15,12 @@
   limitations under the License.
 -->
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import Icon, { type IconName } from '@/components/icons/Icon.vue';
 import logoSw from '@/assets/icons/logo-sw.svg?raw';
 import { useAuthStore } from '@/stores/auth';
-import { LAYERS, hasTopology } from './layers';
+import { useLayers } from '@/composables/useLayers';
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -29,7 +29,25 @@ async function signOut(): Promise<void> {
   await router.push({ name: 'login' });
 }
 
-const expandedLayer = ref<string | null>('general');
+const { layers, oapReachable, oapError, hasTopology } = useLayers();
+
+// Default-open the first active layer once data arrives; user clicks
+// thereafter take over.
+const expandedLayer = ref<string | null>(null);
+let userTouched = false;
+watch(
+  layers,
+  (rows) => {
+    if (userTouched || expandedLayer.value) return;
+    const first = rows.find((L) => L.active) ?? rows[0];
+    if (first) expandedLayer.value = first.key;
+  },
+  { immediate: true },
+);
+function toggleLayer(key: string): void {
+  userTouched = true;
+  expandedLayer.value = expandedLayer.value === key ? null : key;
+}
 
 const route = useRoute();
 function isActive(path: string): boolean {
@@ -122,17 +140,21 @@ const sections: NavSection[] = [
 
       <div class="sw-nav-section sw-row" style="justify-content: space-between">
         <span>Layers</span>
-        <span style="color: var(--sw-fg-3); font-weight: 400">{{ LAYERS.length }} layers</span>
+        <span style="color: var(--sw-fg-3); font-weight: 400">{{ layers.length }} layers</span>
       </div>
-      <template v-for="L in LAYERS" :key="L.key">
+      <div v-if="!oapReachable && oapError" class="oap-banner" :title="oapError">
+        OAP unreachable
+      </div>
+      <template v-for="L in layers" :key="L.key">
         <div
           class="sw-nav-item"
-          :class="{ 'is-active': expandedLayer === L.key }"
-          @click="expandedLayer = expandedLayer === L.key ? null : L.key"
+          :class="{ 'is-active': expandedLayer === L.key, 'is-inactive': !L.active }"
+          @click="toggleLayer(L.key)"
         >
           <span class="layer-dot" :style="{ background: L.color }" />
           <span :style="{ fontWeight: expandedLayer === L.key ? 600 : 500 }">{{ L.name }}</span>
-          <span class="sw-badge" style="margin-left: auto">{{ L.serviceCount }}</span>
+          <span v-if="L.serviceCount >= 0" class="sw-badge" style="margin-left: auto">{{ L.serviceCount }}</span>
+          <span v-else-if="!L.active" class="sw-badge" style="margin-left: auto">no data</span>
           <span class="caret" :class="{ open: expandedLayer === L.key }">
             <Icon name="caret" :size="10" />
           </span>
@@ -174,7 +196,7 @@ const sections: NavSection[] = [
           </RouterLink>
 
           <RouterLink
-            v-if="hasTopology(L.caps)"
+            v-if="hasTopology(L)"
             :to="`/layer/${L.key}/topology`"
             class="sw-nav-item"
             :class="{ 'is-active': isActive(`/layer/${L.key}/topology`) }"
@@ -327,5 +349,21 @@ const sections: NavSection[] = [
 }
 .sw-nav-item.lead {
   margin-top: 4px;
+}
+.sw-nav-item.is-inactive .layer-dot {
+  opacity: 0.4;
+}
+.sw-nav-item.is-inactive > span:nth-child(2) {
+  color: var(--sw-fg-3);
+}
+.oap-banner {
+  margin: 4px 10px 8px;
+  padding: 6px 8px;
+  font-size: 10.5px;
+  color: #f87171;
+  background: var(--sw-err-soft);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 4px;
+  letter-spacing: 0.02em;
 }
 </style>

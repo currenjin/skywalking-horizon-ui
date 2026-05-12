@@ -15,77 +15,52 @@
  * limitations under the License.
  */
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
-import { findLayer } from '@/components/shell/layers';
 import { useAuthStore } from '@/stores/auth';
 
 const placeholder = () => import('@/views/PlaceholderView.vue');
 
-// Build a per-layer route bundle from the layer feature config. Each cap that
-// the layer declares becomes a sub-route under /layer/:layerKey/...
-// Unknown layer keys fall back to a generic "not found" via the catch-all.
+function humanKey(k: string): string {
+  return k.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Layer sub-routes are open-ended — any `:layerKey` is accepted. The real
+// per-layer view (Phase 2.6+) will read live cap data via useLayers() and
+// render a 'doesn't expose' note when the cap is off. The placeholder here
+// only needs the raw key + the feature label.
 function layerSubRoutes(): RouteRecordRaw[] {
   const sub: RouteRecordRaw[] = [];
-
   sub.push({
     path: 'layer/:layerKey',
     component: placeholder,
-    props: (r) => {
-      const L = findLayer(String(r.params.layerKey));
-      return {
-        title: L ? `${L.name} · Overview` : `Layer · ${r.params.layerKey}`,
-        phase: 'Phase 2',
-        note: L
-          ? 'Per-layer landing: KPIs, throughput, service constellation, services table.'
-          : 'Unknown layer key.',
-      };
-    },
+    props: (r) => ({
+      title: `${humanKey(String(r.params.layerKey))} · Overview`,
+      phase: 'Phase 2',
+      note: 'Per-layer landing: KPIs, throughput, service constellation, services table.',
+    }),
   });
 
-  for (const slot of ['services', 'instances', 'endpoints'] as const) {
-    sub.push({
-      path: `layer/:layerKey/${slot}`,
-      component: placeholder,
-      props: (r) => {
-        const L = findLayer(String(r.params.layerKey));
-        const label = L?.slots[slot] ?? slot;
-        return {
-          title: L ? `${L.name} · ${label}` : `Layer · ${slot}`,
-          phase: 'Phase 2 / 3',
-        };
-      },
-    });
-  }
-
-  const layerFeatures: { path: string; label: string; phase: string; capCheck?: (caps: NonNullable<ReturnType<typeof findLayer>>['caps']) => boolean }[] = [
-    {
-      path: 'topology',
-      label: 'Topology',
-      phase: 'Phase 4',
-      capCheck: (c) => Boolean(c.serviceMap || c.instanceTopology || c.processTopology),
-    },
-    { path: 'dependency', label: 'API dependency', phase: 'Phase 4', capCheck: (c) => Boolean(c.endpointDependency) },
-    { path: 'dashboards', label: 'Dashboards', phase: 'Phase 3', capCheck: (c) => Boolean(c.dashboards) },
-    { path: 'traces', label: 'Traces', phase: 'Phase 5', capCheck: (c) => Boolean(c.traces) },
-    { path: 'logs', label: 'Logs', phase: 'Phase 5', capCheck: (c) => Boolean(c.logs) },
-    { path: 'profiling', label: 'Profiling', phase: 'Phase 8', capCheck: (c) => Boolean(c.profiling) },
-    { path: 'events', label: 'Events', phase: 'Phase 5', capCheck: (c) => Boolean(c.events) },
+  const features: { path: string; label: string; phase: string }[] = [
+    { path: 'services', label: 'Services', phase: 'Phase 2 / 3' },
+    { path: 'instances', label: 'Instances', phase: 'Phase 2 / 3' },
+    { path: 'endpoints', label: 'Endpoints', phase: 'Phase 2 / 3' },
+    { path: 'topology', label: 'Topology', phase: 'Phase 4' },
+    { path: 'dependency', label: 'API dependency', phase: 'Phase 4' },
+    { path: 'dashboards', label: 'Dashboards', phase: 'Phase 3' },
+    { path: 'traces', label: 'Traces', phase: 'Phase 5' },
+    { path: 'logs', label: 'Logs', phase: 'Phase 5' },
+    { path: 'profiling', label: 'Profiling', phase: 'Phase 8' },
+    { path: 'events', label: 'Events', phase: 'Phase 5' },
   ];
-  for (const f of layerFeatures) {
+  for (const f of features) {
     sub.push({
       path: `layer/:layerKey/${f.path}`,
       component: placeholder,
-      props: (r) => {
-        const L = findLayer(String(r.params.layerKey));
-        const supported = L && (!f.capCheck || f.capCheck(L.caps));
-        return {
-          title: L ? `${L.name} · ${f.label}` : `Layer · ${f.label}`,
-          phase: f.phase,
-          note: L && !supported ? `${L.name} doesn't expose ${f.label.toLowerCase()}.` : undefined,
-        };
-      },
+      props: (r) => ({
+        title: `${humanKey(String(r.params.layerKey))} · ${f.label}`,
+        phase: f.phase,
+      }),
     });
   }
-
   return sub;
 }
 
