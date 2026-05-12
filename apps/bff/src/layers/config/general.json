@@ -57,17 +57,11 @@
         "rowSpan": 2
       },
       {
-        "id": "mq_combined",
-        "title": "MQ Consume rate + latency",
-        "tip": "Count on the left axis, latency on the right.",
+        "id": "err_line",
+        "title": "Error Rate",
         "type": "line",
-        "expressions": [
-          "service_mq_consume_count",
-          "service_mq_consume_latency"
-        ],
-        "expressionLabels": ["count", "latency"],
-        "expressionUnits": ["/min", "ms"],
-        "expressionAxes": [0, 1],
+        "unit": "%",
+        "expressions": ["100 - service_sla/100"],
         "span": 3,
         "rowSpan": 2
       },
@@ -102,11 +96,17 @@
         "rowSpan": 2
       },
       {
-        "id": "err_line",
-        "title": "Error Rate",
+        "id": "mq_combined",
+        "title": "MQ Consume rate + latency",
+        "tip": "Count on the left axis, latency on the right.",
         "type": "line",
-        "unit": "%",
-        "expressions": ["100 - service_sla/100"],
+        "expressions": [
+          "service_mq_consume_count",
+          "service_mq_consume_latency"
+        ],
+        "expressionLabels": ["count", "latency"],
+        "expressionUnits": ["/min", "ms"],
+        "expressionAxes": [0, 1],
         "span": 3,
         "rowSpan": 2
       },
