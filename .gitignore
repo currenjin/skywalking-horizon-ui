@@ -35,3 +35,8 @@ Thumbs.db
 
 # Local design / planning docs — never committed
 docs/design/
+
+# BFF runtime files
+horizon.yaml
+horizon-audit.jsonl
+horizon-wire.jsonl
