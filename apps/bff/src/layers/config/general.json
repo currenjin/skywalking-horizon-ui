@@ -26,8 +26,7 @@
     "columns": [
       { "metric": "cpm", "label": "RPM", "mqe": "service_cpm", "aggregation": "sum" },
       { "metric": "apdex", "label": "Apdex", "mqe": "service_apdex/10000", "aggregation": "avg" },
-      { "metric": "sla", "label": "SLA", "unit": "%", "mqe": "service_sla/100", "aggregation": "avg" },
-      { "metric": "err", "label": "err", "unit": "%", "mqe": "100 - service_sla/100", "aggregation": "avg" }
+      { "metric": "err", "label": "Error Rate", "unit": "%", "mqe": "100 - service_sla/100", "aggregation": "avg" }
     ]
   },
   "dashboards": {
@@ -58,11 +57,18 @@
         "rowSpan": 2
       },
       {
-        "id": "err_line",
-        "title": "Error Rate",
+        "id": "mq_combined",
+        "title": "MQ Consume rate + latency",
+        "tip": "Dual y-axis: service_mq_consume_count (left) + service_mq_consume_latency (right).",
         "type": "line",
-        "unit": "%",
-        "expressions": ["100 - service_sla/100"],
+        "expressions": [
+          "service_mq_consume_count",
+          "service_mq_consume_latency"
+        ],
+        "expressionLabels": ["count", "latency"],
+        "expressionUnits": ["/min", "ms"],
+        "expressionAxes": [0, 1],
+        "visibleWhen": "service_mq_consume_count has value",
         "span": 3,
         "rowSpan": 2
       },
@@ -97,18 +103,11 @@
         "rowSpan": 2
       },
       {
-        "id": "mq_combined",
-        "title": "MQ Consume rate + latency",
-        "tip": "Dual y-axis: service_mq_consume_count (left) + service_mq_consume_latency (right).",
+        "id": "err_line",
+        "title": "Error Rate",
         "type": "line",
-        "expressions": [
-          "service_mq_consume_count",
-          "service_mq_consume_latency"
-        ],
-        "expressionLabels": ["count", "latency"],
-        "expressionUnits": ["/min", "ms"],
-        "expressionAxes": [0, 1],
-        "visibleWhen": "service_mq_consume_count has value",
+        "unit": "%",
+        "expressions": ["100 - service_sla/100"],
         "span": 3,
         "rowSpan": 2
       },
