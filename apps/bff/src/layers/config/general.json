@@ -34,11 +34,16 @@
     "service": [
       {
         "id": "top_apis",
-        "title": "Top 20 APIs by traffic",
-        "tip": "top_n(endpoint_cpm,20,des) — scoped to the whole layer (not the selected service).",
+        "title": "Top 20 APIs",
+        "tip": "Layer-wide ranking. Switch tabs to re-rank by:\n  Traffic        top_n(endpoint_cpm,20,des)\n  Slow response  top_n(endpoint_resp_time,20,des)\n  Worst SR       top_n(endpoint_sla,20,asc)/100",
         "type": "top",
         "unit": "rpm",
-        "expressions": ["top_n(endpoint_cpm,20,des)"],
+        "expressions": [
+          "top_n(endpoint_cpm,20,des)",
+          "top_n(endpoint_resp_time,20,des)",
+          "top_n(endpoint_sla,20,asc)/100"
+        ],
+        "expressionLabels": ["Traffic", "Slow", "SR"],
         "layerScope": true,
         "span": 3,
         "rowSpan": 4

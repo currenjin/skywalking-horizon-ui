@@ -208,7 +208,13 @@ function isVisible(
           </template>
           <template v-else-if="w.type === 'top'">
             <TopList
-              v-if="resultsById.get(w.id)?.topList?.length"
+              v-if="resultsById.get(w.id)?.topGroups?.length"
+              :groups="resultsById.get(w.id)!.topGroups!"
+              :unit="w.unit"
+              :color="widgetColor(w)"
+            />
+            <TopList
+              v-else-if="resultsById.get(w.id)?.topList?.length"
               :items="resultsById.get(w.id)!.topList!"
               :unit="w.unit"
               :color="widgetColor(w)"

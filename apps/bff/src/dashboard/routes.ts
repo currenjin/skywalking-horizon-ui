@@ -64,6 +64,7 @@ const widgetSchema = z.object({
   tip: z.string().optional(),
   type: z.enum(['card', 'line', 'top']),
   expressions: z.array(z.string().min(1)).min(1).max(8),
+  expressionLabels: z.array(z.string()).max(8).optional(),
   unit: z.string().optional(),
   span: z.number().int().min(1).max(12).optional(),
   rowSpan: z.number().int().min(1).max(64).optional(),
@@ -351,9 +352,30 @@ export function registerDashboardRoute(app: FastifyInstance, deps: DashboardRout
       //  - 'top':  extract sorted list from the first expression
       const results: DashboardWidgetResult[] = widgets.map((widget, wIdx) => {
         if (widget.type === 'top') {
-          const r = data[`w${wIdx}_e0`];
-          const top = parseTopList(r);
-          return top ? { id: widget.id, topList: top } : { id: widget.id, error: 'no data' };
+          // Every expression contributes one switchable group (e.g.
+          // "Top by traffic" / "Top slowest" / "Top by SR"). The UI
+          // renders a tab per group and shows the active one; the
+          // expression travels along so the tab tooltip can surface
+          // the MQE.
+          const groups: Array<{
+            label: string;
+            expression: string;
+            items: NonNullable<ReturnType<typeof parseTopList>>;
+          }> = [];
+          widget.expressions.forEach((expr, eIdx) => {
+            const items = parseTopList(data[`w${wIdx}_e${eIdx}`]);
+            if (!items) return;
+            const label = widget.expressionLabels?.[eIdx] ?? expr;
+            groups.push({ label, expression: expr, items });
+          });
+          if (groups.length === 0) return { id: widget.id, error: 'no data' };
+          return {
+            id: widget.id,
+            topGroups: groups,
+            // Keep `topList` set to the first group's items for any
+            // older SPA paths that still read the flat field.
+            topList: groups[0].items,
+          };
         }
 
         if (widget.type === 'card') {

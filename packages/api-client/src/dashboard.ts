@@ -52,8 +52,16 @@ export interface DashboardWidget {
   tip?: string;
   type: DashboardWidgetType;
   /** One or more MQE expressions. `card` collapses to a scalar (avg);
-   *  `line` renders one labeled series per expression. */
+   *  `line` renders one labeled series per expression; `top` treats
+   *  every expression as a switchable view (see `expressionLabels`). */
   expressions: string[];
+  /**
+   * Optional human-readable label per entry in `expressions`. For
+   * `top` widgets these drive the in-widget switcher tabs (e.g.
+   * "Traffic" / "Slow" / "Errors"). When missing the SPA falls back
+   * to the expression text. Indices align with `expressions`.
+   */
+  expressionLabels?: string[];
   /** Suffix unit (`%`, `ms`, `calls / min`). */
   unit?: string;
   /**
@@ -119,8 +127,15 @@ export interface DashboardWidgetResult {
    *  by OAP when present (e.g. `percentile='99'`); otherwise the raw
    *  expression string is used. */
   series?: DashboardSeries[];
-  /** `top` payload — sorted list returned by a `top_n(...)` MQE. */
+  /** `top` payload — legacy single sorted list. Present when the
+   *  widget has exactly one expression. */
   topList?: DashboardTopItem[];
+  /** `top` payload — multi-expression results, one entry per
+   *  `expressions[i]`. UI renders a switcher (one tab per group) and
+   *  shows the active group's list. `expression` is echoed so the UI
+   *  can surface the MQE in the tab tooltip. Indices align with
+   *  `widget.expressions`. */
+  topGroups?: Array<{ label: string; expression: string; items: DashboardTopItem[] }>;
 }
 
 export interface DashboardResponse {
