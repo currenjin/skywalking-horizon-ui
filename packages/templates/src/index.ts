@@ -15,5 +15,8 @@
  * limitations under the License.
  */
 
-// Phase 2 will populate this with the ui-initialized-templates bundle.
+// Horizon-native template format will be designed against the new visual
+// spec, not carried forward from booster-ui / ui-initialized-templates.
+// The upstream bundle is kept locally under `docs/design/research/` as a
+// learning reference only — never imported at runtime.
 export {};
