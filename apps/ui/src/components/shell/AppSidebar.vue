@@ -34,6 +34,23 @@ const { availableLayers, oapReachable, oapError, hasTopology } = useLayers();
 // Sidebar shares the landing's priority order so the two views stay in sync.
 const orderedLayers = useLandingOrder(availableLayers);
 
+/* A layer counts as "single-feature" when its caps + slots only support
+ * the basic services view + maybe a dashboards tab — no traces, logs,
+ * topology, profiling, events, instances, or endpoints. For these,
+ * expanding the row would reveal at most one or two sibling links, so
+ * we skip the expander and make the row a direct link to the services
+ * page (which IS the dashboard for virtual / cache / database / MQ
+ * scopes). */
+type SidebarLayer = (typeof orderedLayers.value)[number];
+function isSingleFeatureLayer(L: SidebarLayer): boolean {
+  if (L.slots.instances || L.slots.endpoints) return false;
+  if (hasTopology(L)) return false;
+  const c = L.caps;
+  if (c.traces || c.logs || c.profiling || c.events) return false;
+  if (c.endpointDependency || c.serviceMap || c.instanceTopology || c.processTopology) return false;
+  return true;
+}
+
 // Default-open the first available layer once data arrives; user clicks
 // thereafter take over.
 const expandedLayer = ref<string | null>(null);
@@ -157,7 +174,25 @@ const sections: NavSection[] = [
         </RouterLink>
       </div>
       <template v-for="L in orderedLayers" :key="L.key">
+        <!-- Single-feature layer (virtual_database, virtual_cache, etc.):
+             render as a direct link — no expander, no children. The
+             services page is the layer's effective dashboard. -->
+        <RouterLink
+          v-if="isSingleFeatureLayer(L)"
+          :to="`/layer/${L.key}/services`"
+          class="layer-row direct"
+          :class="{ 'is-active': isActive(`/layer/${L.key}`) }"
+        >
+          <span class="layer-dot" :style="{ background: L.color }" />
+          <span class="layer-name">{{ L.name }}</span>
+          <span class="layer-count" :title="`${L.serviceCount} service${L.serviceCount === 1 ? '' : 's'} reporting`">
+            {{ L.serviceCount }}
+          </span>
+        </RouterLink>
+
+        <!-- Multi-feature layer: expander row + children. -->
         <div
+          v-else
           class="layer-row"
           :class="{ 'is-active': expandedLayer === L.key }"
           @click="toggleLayer(L.key)"
@@ -173,7 +208,7 @@ const sections: NavSection[] = [
             <Icon name="caret" :size="10" />
           </span>
         </div>
-        <div v-if="expandedLayer === L.key" class="layer-children">
+        <div v-if="!isSingleFeatureLayer(L) && expandedLayer === L.key" class="layer-children">
           <RouterLink
             v-if="L.slots.services"
             :to="`/layer/${L.key}/services`"
@@ -367,6 +402,9 @@ const sections: NavSection[] = [
   color: var(--sw-accent-2);
   background: var(--sw-accent-soft);
   border-color: var(--sw-accent-line);
+}
+.layer-row.direct {
+  text-decoration: none;
 }
 .empty-layers {
   margin: 4px 10px 8px;

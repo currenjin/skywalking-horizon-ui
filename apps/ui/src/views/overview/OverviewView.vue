@@ -20,6 +20,7 @@ import { RouterLink } from 'vue-router';
 import { useLayers } from '@/composables/useLayers';
 import { useLandingOrder } from '@/composables/useLandingOrder';
 import AlarmsPanel from './AlarmsPanel.vue';
+import LayerKpiStripCard from './LayerKpiStripCard.vue';
 import LayerKpiTile from './LayerKpiTile.vue';
 import LayerLandingCard from './LayerLandingCard.vue';
 
@@ -72,29 +73,33 @@ const empty = computed(() => !isLoading.value && orderedLayers.value.length === 
       </div>
     </div>
 
-    <div v-else class="overview-grid">
-      <!-- Top 2 featured cards: side-by-side, each 2/5 of the page width. -->
-      <LayerLandingCard
-        v-for="L in featured"
-        :key="L.key"
-        :layer="L"
-        :class="`featured featured-${featured.indexOf(L) + 1}`"
-      />
-
-      <!-- Alarms rail: pinned to the right column, rowspans all visible rows. -->
-      <AlarmsPanel class="alarms-rail" />
-
-      <!-- Compact tiles: 2x2 grid filling 3/5 of the page width across 2 rows. -->
-      <div class="compact-grid">
-        <LayerKpiTile v-for="L in compact" :key="L.key" :layer="L" />
+    <template v-else>
+      <!-- Top KPI strip: 6 equal-width per-layer cards (service count +
+           throughput value + sparkline). Adopts the design's KPI-strip
+           style at landing.jsx:30-38. -->
+      <div class="kpi-strip" :style="{ '--kpi-count': topSix.length }">
+        <LayerKpiStripCard v-for="L in topSix" :key="L.key" :layer="L" />
       </div>
 
-      <div v-if="overflow > 0" class="overflow-note">
-        {{ overflow }} more layer{{ overflow === 1 ? '' : 's' }} not shown.
-        <RouterLink to="/setup">Re-order via setup</RouterLink>
-        to surface them.
+      <!-- Detail grid: 2 featured cards + 4 compact tiles + alarms rail. -->
+      <div class="overview-grid">
+        <LayerLandingCard
+          v-for="L in featured"
+          :key="L.key"
+          :layer="L"
+          :class="`featured featured-${featured.indexOf(L) + 1}`"
+        />
+        <AlarmsPanel class="alarms-rail" />
+        <div class="compact-grid">
+          <LayerKpiTile v-for="L in compact" :key="L.key" :layer="L" />
+        </div>
+        <div v-if="overflow > 0" class="overflow-note">
+          {{ overflow }} more layer{{ overflow === 1 ? '' : 's' }} not shown.
+          <RouterLink to="/setup">Re-order via setup</RouterLink>
+          to surface them.
+        </div>
       </div>
-    </div>
+    </template>
   </div>
 </template>
 
@@ -172,6 +177,26 @@ const empty = computed(() => !isLoading.value && orderedLayers.value.length === 
 .empty-card a {
   color: var(--sw-accent-2);
   text-decoration: none;
+}
+
+/* Top per-layer KPI strip — 6 equal columns (or fewer if fewer than 6
+ * layers are reporting). `--kpi-count` is set from the template so the
+ * grid never goes wider than necessary. */
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(var(--kpi-count, 6), 1fr);
+  gap: 12px;
+  margin-bottom: 14px;
+}
+@media (max-width: 1100px) {
+  .kpi-strip {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+@media (max-width: 720px) {
+  .kpi-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 /* Layout — 5fr grid:
