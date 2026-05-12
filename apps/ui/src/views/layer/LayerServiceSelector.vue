@@ -202,10 +202,18 @@ function colorForStatus(s: 'ok' | 'warn' | 'err'): string {
 }
 .picker-table tr.row.active {
   background: var(--sw-accent-soft);
+  box-shadow: inset 3px 0 0 var(--sw-accent);
+}
+.picker-table tr.row.active td {
+  /* Lift the inner border so the highlight reads as one block. */
+  border-bottom-color: var(--sw-accent-line);
 }
 .picker-table tr.row.active .name-text {
   color: var(--sw-accent-2);
-  font-weight: 600;
+  font-weight: 700;
+}
+.picker-table tr.row.active .pulse {
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.18);
 }
 .picker-table .empty {
   text-align: center;

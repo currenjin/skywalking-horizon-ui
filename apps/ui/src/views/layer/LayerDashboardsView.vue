@@ -81,7 +81,6 @@ const resultsById = computed(() => {
 });
 const reachable = computed(() => data.value?.reachable !== false);
 const errorText = computed(() => data.value?.error ?? (error.value ? String(error.value) : null));
-const headerTitle = computed(() => serviceName.value ?? data.value?.service ?? 'Pick a service');
 
 /** Map a widget's grid footprint into the new 12-col flow grid. Honors
  *  `span` / `rowSpan` first; falls back to legacy `w` / `h` (24-col
@@ -130,12 +129,9 @@ function isVisible(
 
 <template>
   <div class="dash-tab">
-    <header class="dash-head">
-      <h2 class="svc-title">{{ headerTitle }}</h2>
-      <div class="state">
-        <span v-if="isFetching" class="badge fetch">refreshing</span>
-        <span v-else-if="!reachable" class="badge err">OAP unreachable</span>
-      </div>
+    <header v-if="isFetching || !reachable" class="dash-head">
+      <span v-if="isFetching" class="badge fetch">refreshing</span>
+      <span v-else-if="!reachable" class="badge err">OAP unreachable</span>
     </header>
 
     <div v-if="!reachable" class="banner err">
@@ -195,18 +191,8 @@ function isVisible(
 .dash-head {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 12px;
-}
-.svc-title {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--sw-fg-0);
-  font-family: var(--sw-mono);
-  letter-spacing: -0.01em;
-}
-.state {
-  margin-left: auto;
 }
 .badge {
   font-size: 10px;
