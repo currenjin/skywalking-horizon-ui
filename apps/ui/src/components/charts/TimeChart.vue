@@ -110,18 +110,21 @@ function buildOption(): echarts.EChartsCoreOption {
     },
     legend: {
       show: props.series.length > 1,
-      top: 0,
-      left: 0,
-      textStyle: { color: '#94a3b8', fontSize: 10 },
+      top: 2,
+      left: 4,
+      padding: [0, 0, 0, 0],
+      textStyle: { color: '#94a3b8', fontSize: 10, lineHeight: 12 },
       itemWidth: 10,
       itemHeight: 8,
-      itemGap: 12,
+      itemGap: 10,
       icon: 'roundRect',
     },
     grid: {
       left: 36,
       right: props.series.some((s) => (s.yAxisIndex ?? 0) === 1) ? 32 : 8,
-      top: props.series.length > 1 ? 22 : 8,
+      // When legend renders we need ~18px above the plot for the chips
+      // and a few px breathing room before the top axis label kicks in.
+      top: props.series.length > 1 ? 28 : 10,
       bottom: 8,
       containLabel: false,
     },

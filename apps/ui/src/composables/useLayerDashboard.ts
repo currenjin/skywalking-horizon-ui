@@ -49,14 +49,27 @@ export function useLayerDashboard(
   layerKey: Ref<string>,
   service: Ref<string | null>,
   scope?: Ref<string>,
+  /** Optional `?mockTop=N` passthrough — when set, every TopList in
+   *  the response is padded to N synthetic rows for UI sizing tests. */
+  mockTop?: Ref<number>,
 ) {
   const q = useQuery({
-    queryKey: ['dashboard', layerKey, service, scope ?? computed(() => 'service')],
+    queryKey: [
+      'dashboard',
+      layerKey,
+      service,
+      scope ?? computed(() => 'service'),
+      mockTop ?? computed(() => 0),
+    ],
     queryFn: () =>
-      bffClient.dashboard(layerKey.value, {
-        ...(service.value ? { service: service.value } : {}),
-        ...(scope?.value ? { scope: scope.value } : {}),
-      }),
+      bffClient.dashboard(
+        layerKey.value,
+        {
+          ...(service.value ? { service: service.value } : {}),
+          ...(scope?.value ? { scope: scope.value } : {}),
+        },
+        mockTop?.value ? { mockTop: mockTop.value } : {},
+      ),
     enabled: computed(() => layerKey.value.length > 0),
     staleTime: 45_000,
     refetchInterval: 60_000,

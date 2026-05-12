@@ -197,10 +197,15 @@ export class BffClient {
   dashboard(
     layerKey: string,
     body: { service?: string; widgets?: DashboardWidget[]; scope?: string } = {},
+    /** Dev-mode mock: pad every TopList result to N entries with
+     *  synthetic rows so operators can verify widget sizing without
+     *  waiting for live data. Forwarded as `?mockTop=N`. */
+    opts: { mockTop?: number } = {},
   ): Promise<DashboardResponse> {
+    const qs = opts.mockTop && opts.mockTop > 0 ? `?mockTop=${opts.mockTop}` : '';
     return this.request<DashboardResponse>(
       'POST',
-      `/api/layer/${encodeURIComponent(layerKey)}/dashboard`,
+      `/api/layer/${encodeURIComponent(layerKey)}/dashboard${qs}`,
       body,
     );
   }

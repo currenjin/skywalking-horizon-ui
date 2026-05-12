@@ -72,8 +72,18 @@ const serviceName = computed<string | null>(() => {
   return match?.serviceName ?? null;
 });
 
+// Dev-only escape hatch: appending `?mockTop=10` to the page URL pads
+// every TopList result to N synthetic rows. Helps operators verify
+// widget heights without waiting for OAP to populate the layer.
+const mockTop = computed<number>(() => {
+  const v = route.query.mockTop;
+  if (typeof v !== 'string') return 0;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.min(40, n) : 0;
+});
+
 const { config, isLoading: configLoading } = useLayerDashboardConfig(layerKey, scope);
-const { data, isFetching, error } = useLayerDashboard(layerKey, serviceName, scope);
+const { data, isFetching, error } = useLayerDashboard(layerKey, serviceName, scope, mockTop);
 
 const widgets = computed(() => config.value?.widgets ?? []);
 const resultsById = computed(() => {

@@ -154,7 +154,7 @@ const showTabs = computed(() => effectiveGroups.value.length > 1);
 .rows {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   padding: 2px 2px 4px;
   overflow-y: auto;
   flex: 1;
@@ -162,11 +162,12 @@ const showTabs = computed(() => effectiveGroups.value.length > 1);
 }
 .row {
   display: grid;
-  grid-template-columns: 18px 1fr 48px 64px;
+  grid-template-columns: 18px 1fr 48px 56px;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
-  padding: 1px 0;
+  font-size: 10.5px;
+  padding: 0;
+  line-height: 1.3;
 }
 .rank {
   font-family: var(--sw-mono);

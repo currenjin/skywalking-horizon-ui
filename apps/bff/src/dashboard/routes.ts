@@ -276,6 +276,11 @@ export function registerDashboardRoute(app: FastifyInstance, deps: DashboardRout
       if (!parsed.success) {
         return reply.code(400).send({ error: 'invalid_body', detail: parsed.error.flatten() });
       }
+      // Dev-mode query param `?mockTop=N` pads every TopList result to
+      // exactly N entries with synthetic rows. Use to verify widget
+      // height / overflow without waiting for OAP to populate the layer.
+      const mockTopRaw = (req.query as { mockTop?: string }).mockTop;
+      const mockTopN = mockTopRaw ? Math.max(0, Math.min(40, Number(mockTopRaw))) : 0;
       const scope = parsed.data.scope ?? 'service';
       const tpl = getLayerTemplate(layerKey);
       const widgets: DashboardWidget[] =
@@ -368,11 +373,6 @@ export function registerDashboardRoute(app: FastifyInstance, deps: DashboardRout
       //  - 'top':  extract sorted list from the first expression
       const results: DashboardWidgetResult[] = widgets.map((widget, wIdx) => {
         if (widget.type === 'top') {
-          // Every expression contributes one switchable group (e.g.
-          // "Top by traffic" / "Top slowest" / "Top by SR"). The UI
-          // renders a tab per group and shows the active one; the
-          // expression travels along so the tab tooltip can surface
-          // the MQE.
           const groups: Array<{
             label: string;
             expression: string;
@@ -380,7 +380,33 @@ export function registerDashboardRoute(app: FastifyInstance, deps: DashboardRout
             items: NonNullable<ReturnType<typeof parseTopList>>;
           }> = [];
           widget.expressions.forEach((expr, eIdx) => {
-            const items = parseTopList(data[`w${wIdx}_e${eIdx}`]);
+            let items = parseTopList(data[`w${wIdx}_e${eIdx}`]);
+            // Pad with synthetic rows when mockTop is requested. Each
+            // padded row gets a plausible name + a value tapered down
+            // from the last real row so the list reads as ranked.
+            if (mockTopN > 0) {
+              const current = items ?? [];
+              const padCount = Math.max(0, mockTopN - current.length);
+              if (padCount > 0) {
+                const last = current[current.length - 1]?.value ?? 100;
+                const seed = current[current.length - 1]?.name ?? 'mock-service';
+                const padded = Array.from({ length: padCount }, (_, i) => {
+                  const idx = current.length + i + 1;
+                  const decay = 1 - (i + 1) / (padCount + 2);
+                  return {
+                    name: `${seed} · mock-${idx}`,
+                    value: typeof last === 'number' ? Math.round(last * decay * 100) / 100 : 0,
+                  };
+                });
+                items = [...current, ...padded];
+              }
+              if (!items || items.length === 0) {
+                items = Array.from({ length: mockTopN }, (_, i) => ({
+                  name: `mock-entity-${i + 1}`,
+                  value: Math.round((100 - i * 8) * 100) / 100,
+                }));
+              }
+            }
             if (!items) return;
             const label = widget.expressionLabels?.[eIdx] ?? expr;
             const unit = widget.expressionUnits?.[eIdx];
@@ -395,8 +421,6 @@ export function registerDashboardRoute(app: FastifyInstance, deps: DashboardRout
           return {
             id: widget.id,
             topGroups: groups,
-            // Keep `topList` set to the first group's items for any
-            // older SPA paths that still read the flat field.
             topList: groups[0].items,
           };
         }
