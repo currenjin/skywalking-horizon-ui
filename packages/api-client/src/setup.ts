@@ -40,6 +40,10 @@ export interface LandingColumn {
   metric: string;
   /** Short header label (e.g. `cpm`). */
   label: string;
+  /** Hover tip (string only, no markdown). Used by the Overview tile
+   *  metric cells; the SPA surfaces it via the cell label's `title`
+   *  attribute. */
+  tip?: string;
   /** Suffix unit (`%`, `ms`, etc.). */
   unit?: string;
   /**
@@ -101,6 +105,19 @@ export interface LandingConfig {
   spark?: { metric: string; height: number };
   /** Optional headline metric for the per-layer KPI strip tile. */
   throughput?: ThroughputConfig;
+  /** @deprecated kept for back-compat; new code reads `overviewGroups`. */
+  overviewMetrics?: string[];
+  /** Resolved Overview tile groups. Each group becomes one tile on
+   *  the Overview strip with the group's `title` in the header.
+   *  Metrics are referenced by id — those ids show up as synthetic
+   *  entries in `columns[]` so the BFF batches their MQE in the
+   *  same landing query. */
+  overviewGroups?: Array<{
+    title: string;
+    size: 'auto' | 'square';
+    /** Column-key references into `columns[]`. */
+    metricIds: string[];
+  }>;
   style: 'table' | 'bar' | 'mini-topology';
 }
 

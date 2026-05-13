@@ -27,10 +27,14 @@
   back-compat with older JSONs but operators don't edit them.
 -->
 <script setup lang="ts">
-import { computed, reactive, ref, onMounted, watch } from 'vue';
+import { computed, reactive, ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import type { AdminLayerTemplate } from '@/api/client';
 import type { DashboardScope, DashboardWidget } from '@skywalking-horizon-ui/api-client';
 import { bffClient } from '@/api/client';
+import TimeChart from '@/components/charts/TimeChart.vue';
+import TopList from '@/components/charts/TopList.vue';
+import { fmtMetric } from '@/utils/formatters';
+import { mockCardValue, mockLineSeries, mockRecordRows, mockTopGroups } from './widget-mock';
 
 const SCOPES: DashboardScope[] = [
   'service',
@@ -40,8 +44,25 @@ const SCOPES: DashboardScope[] = [
   'topology',
   'trace',
   'logs',
-  'profiling',
+  'traceProfiling',
+  'ebpfProfiling',
+  'asyncProfiling',
 ];
+/** Display label for each scope — kebab-cases the profiling scopes
+ *  so the scope tab strip reads as "trace profiling" instead of the
+ *  camelCase key. */
+const SCOPE_LABELS: Record<DashboardScope, string> = {
+  service: 'service',
+  instance: 'instance',
+  endpoint: 'endpoint',
+  dependency: 'dependency',
+  topology: 'topology',
+  trace: 'trace',
+  logs: 'logs',
+  traceProfiling: 'trace profiling',
+  ebpfProfiling: 'eBPF profiling',
+  asyncProfiling: 'async profiling',
+};
 
 const templates = ref<AdminLayerTemplate[]>([]);
 const isLoading = ref(true);
@@ -50,6 +71,10 @@ const selectedKey = ref<string>('');
 const activeScope = ref<DashboardScope>('service');
 const isSaving = ref(false);
 const saveMsg = ref<string | null>(null);
+/** When false the layers rail collapses to a thin dot-strip so the
+ *  editor can claim the full width. The toggle in the rail header
+ *  flips this; layer switching still works via dot click. */
+const layerListOpen = ref(true);
 
 /** Working copy — reactively edited. Diffs against `templates` to drive
  *  the Save / Reset state. */
@@ -94,7 +119,9 @@ const SCOPE_COMPONENT: Record<DashboardScope, ComponentKey> = {
   topology: 'topology',
   trace: 'traces',
   logs: 'logs',
-  profiling: 'profiling',
+  traceProfiling: 'traceProfiling',
+  ebpfProfiling: 'ebpfProfiling',
+  asyncProfiling: 'asyncProfiling',
 };
 const visibleScopes = computed<DashboardScope[]>(() => {
   const tpl = draft.template;
@@ -166,6 +193,201 @@ function moveWidget(i: number, dir: -1 | 1): void {
   if (j < 0 || j >= widgets.length) return;
   [widgets[i], widgets[j]] = [widgets[j], widgets[i]];
   setWidgetsFor(activeScope.value, widgets);
+}
+
+/* ------------------------------------------------------------------- *
+ * Canvas state — selection + drag.
+ *
+ * `selectedIdx` is the index of the widget whose config is shown in the
+ * right drawer. `resize` / `reorder` are short-lived mutually-exclusive
+ * drag sessions: only one is active at a time, both are torn down on
+ * window mouseup. We track them at the script level (not on the widget
+ * objects) so a re-renderable drag preview can ride along without
+ * mutating the saved template until commit.
+ * ------------------------------------------------------------------- */
+
+const selectedIdx = ref<number | null>(null);
+
+/** When the user switches scope or layer we drop the selection so the
+ *  drawer doesn't refer to a widget that no longer exists. */
+watch([activeScope, selectedKey], () => {
+  selectedIdx.value = null;
+});
+
+const canvasEl = ref<HTMLDivElement | null>(null);
+
+/** Active resize session: tracks the starting span/rowSpan + pixel
+ *  origin so we can compute the new span from the mouse delta. */
+const resize = reactive<{
+  active: boolean;
+  idx: number;
+  startX: number;
+  startY: number;
+  startSpan: number;
+  startRowSpan: number;
+  cellW: number;
+  cellH: number;
+}>({
+  active: false,
+  idx: -1,
+  startX: 0,
+  startY: 0,
+  startSpan: 1,
+  startRowSpan: 1,
+  cellW: 1,
+  cellH: 1,
+});
+
+const CANVAS_COLS = 12;
+const CANVAS_ROW_PX = 120;
+const CANVAS_GAP_PX = 8;
+
+function widgetSpan(w: DashboardWidget): number {
+  return Math.min(CANVAS_COLS, Math.max(1, w.span ?? 4));
+}
+function widgetRowSpan(w: DashboardWidget): number {
+  return Math.max(1, w.rowSpan ?? 2);
+}
+function widgetGridStyle(w: DashboardWidget): Record<string, string> {
+  return {
+    gridColumn: `span ${widgetSpan(w)}`,
+    gridRow: `span ${widgetRowSpan(w)}`,
+  };
+}
+
+function onResizeStart(e: MouseEvent, i: number): void {
+  e.preventDefault();
+  e.stopPropagation();
+  const widgets = currentWidgets.value;
+  const w = widgets[i];
+  if (!w || !canvasEl.value) return;
+  const rect = canvasEl.value.getBoundingClientRect();
+  // The canvas grid uses 12 equal-width columns with a fixed gap. Column
+  // width is therefore (canvasWidth - 11 gaps - 2 padding) / 12. We snap
+  // the dragged span based on this cell pitch.
+  const cellW = (rect.width - 2 * 12 - CANVAS_GAP_PX * (CANVAS_COLS - 1)) / CANVAS_COLS;
+  resize.active = true;
+  resize.idx = i;
+  resize.startX = e.clientX;
+  resize.startY = e.clientY;
+  resize.startSpan = widgetSpan(w);
+  resize.startRowSpan = widgetRowSpan(w);
+  resize.cellW = cellW + CANVAS_GAP_PX;
+  resize.cellH = CANVAS_ROW_PX + CANVAS_GAP_PX;
+  selectedIdx.value = i;
+  window.addEventListener('mousemove', onResizeMove);
+  window.addEventListener('mouseup', onResizeEnd);
+}
+function onResizeMove(e: MouseEvent): void {
+  if (!resize.active) return;
+  const dx = e.clientX - resize.startX;
+  const dy = e.clientY - resize.startY;
+  const newSpan = Math.max(1, Math.min(CANVAS_COLS, resize.startSpan + Math.round(dx / resize.cellW)));
+  const newRowSpan = Math.max(1, Math.min(8, resize.startRowSpan + Math.round(dy / resize.cellH)));
+  const widgets = [...currentWidgets.value];
+  const w = widgets[resize.idx];
+  if (!w) return;
+  if (w.span !== newSpan || w.rowSpan !== newRowSpan) {
+    widgets[resize.idx] = { ...w, span: newSpan, rowSpan: newRowSpan };
+    setWidgetsFor(activeScope.value, widgets);
+  }
+}
+function onResizeEnd(): void {
+  resize.active = false;
+  window.removeEventListener('mousemove', onResizeMove);
+  window.removeEventListener('mouseup', onResizeEnd);
+}
+
+/** Active reorder session: tracks the dragged widget index and the
+ *  current hover target. Drop reorders the array — no live mutation
+ *  during the drag (the dragged widget keeps its slot but dims, the
+ *  hover target gets a leading marker). */
+const reorder = reactive<{
+  active: boolean;
+  from: number;
+  over: number;
+}>({
+  active: false,
+  from: -1,
+  over: -1,
+});
+
+function onReorderStart(e: DragEvent, i: number): void {
+  // Only allow drag from the widget's header. The header sets
+  // draggable=true; resize handles + drawer inputs do not.
+  reorder.active = true;
+  reorder.from = i;
+  reorder.over = i;
+  selectedIdx.value = i;
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(i));
+  }
+}
+function onReorderOver(e: DragEvent, i: number): void {
+  if (!reorder.active) return;
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+  if (reorder.over !== i) reorder.over = i;
+}
+function onReorderDrop(e: DragEvent, i: number): void {
+  if (!reorder.active) return;
+  e.preventDefault();
+  const from = reorder.from;
+  const to = i;
+  if (from !== to) {
+    const widgets = [...currentWidgets.value];
+    const [moved] = widgets.splice(from, 1);
+    widgets.splice(to, 0, moved);
+    setWidgetsFor(activeScope.value, widgets);
+    selectedIdx.value = to;
+  }
+  reorder.active = false;
+  reorder.from = -1;
+  reorder.over = -1;
+}
+function onReorderEnd(): void {
+  reorder.active = false;
+  reorder.from = -1;
+  reorder.over = -1;
+}
+
+onBeforeUnmount(() => {
+  window.removeEventListener('mousemove', onResizeMove);
+  window.removeEventListener('mouseup', onResizeEnd);
+});
+
+/** Convenience: the currently-selected widget. Used by the drawer. */
+const selectedWidget = computed<DashboardWidget | null>(() => {
+  if (selectedIdx.value === null) return null;
+  return currentWidgets.value[selectedIdx.value] ?? null;
+});
+
+function selectWidget(i: number): void {
+  selectedIdx.value = i;
+}
+
+/** Drawer commits edits in place on the live draft via v-model — no
+ *  separate apply step. The button row offers a delete shortcut. */
+function deleteSelected(): void {
+  if (selectedIdx.value === null) return;
+  deleteWidget(selectedIdx.value);
+  selectedIdx.value = null;
+}
+function moveSelected(dir: -1 | 1): void {
+  if (selectedIdx.value === null) return;
+  const i = selectedIdx.value;
+  moveWidget(i, dir);
+  const j = i + dir;
+  if (j >= 0 && j < currentWidgets.value.length) selectedIdx.value = j;
+}
+
+/** When a new widget is added, immediately select it so the drawer
+ *  opens with empty fields ready for input. */
+async function addAndSelectWidget(): Promise<void> {
+  addWidget();
+  await nextTick();
+  selectedIdx.value = currentWidgets.value.length - 1;
 }
 
 function expressionsToText(arr: string[]): string {
@@ -310,7 +532,9 @@ const COMPONENT_TOGGLES: Array<{ key: ComponentKey; label: string; hint: string 
   { key: 'topology', label: 'Topology', hint: 'Service topology graph for this layer (Phase 4).' },
   { key: 'traces', label: 'Traces', hint: 'Trace explorer scoped to this layer (Phase 5).' },
   { key: 'logs', label: 'Logs', hint: 'Log explorer scoped to this layer (Phase 5).' },
-  { key: 'profiling', label: 'Profiling', hint: 'Flame graphs / sampled stacks (Phase 8).' },
+  { key: 'traceProfiling', label: 'Trace Profiling', hint: 'Trace-driven thread profiling — the original SkyWalking profile.' },
+  { key: 'ebpfProfiling', label: 'eBPF Profiling', hint: 'Kernel-level CPU / off-CPU profiling via eBPF agents.' },
+  { key: 'asyncProfiling', label: 'Async Profiling', hint: 'JVM async-profiler integration (Java-only).' },
 ];
 
 function ensureComponents(): AdminLayerTemplate['components'] {
@@ -344,22 +568,48 @@ function toggleComponent(key: ComponentKey): void {
     <div v-if="isLoading" class="empty">Loading templates…</div>
     <div v-else-if="templates.length === 0" class="empty">No layer templates loaded.</div>
 
-    <div v-else class="grid">
-      <aside class="sw-card layer-list">
+    <div v-else class="grid" :class="{ 'list-collapsed': !layerListOpen }">
+      <aside class="sw-card layer-list" :class="{ collapsed: !layerListOpen }">
         <div class="list-head">
-          <h4>Layers</h4>
-          <span class="sub">{{ templates.length }} template{{ templates.length === 1 ? '' : 's' }}</span>
+          <button
+            class="list-toggle"
+            type="button"
+            :title="layerListOpen ? 'Collapse the layers list' : 'Expand the layers list'"
+            @click="layerListOpen = !layerListOpen"
+          >
+            <span class="caret" :class="{ open: layerListOpen }">›</span>
+          </button>
+          <h4 v-if="layerListOpen">Layers</h4>
+          <span v-if="layerListOpen" class="sub">
+            {{ templates.length }} template{{ templates.length === 1 ? '' : 's' }}
+          </span>
         </div>
-        <button
-          v-for="t in templates"
-          :key="t.key"
-          class="layer-row"
-          :class="{ active: selectedKey === t.key }"
-          @click="selectedKey = t.key"
-        >
-          <span class="dot" :style="{ background: t.color || 'var(--sw-fg-3)' }" />
-          <span class="name">{{ t.alias || t.key }}</span>
-        </button>
+        <template v-if="layerListOpen">
+          <button
+            v-for="t in templates"
+            :key="t.key"
+            class="layer-row"
+            :class="{ active: selectedKey === t.key }"
+            @click="selectedKey = t.key"
+          >
+            <span class="dot" :style="{ background: t.color || 'var(--sw-fg-3)' }" />
+            <span class="name">{{ t.alias || t.key }}</span>
+          </button>
+        </template>
+        <!-- Collapsed mode shows just colored dots for navigation; click
+             a dot to switch layers without expanding. -->
+        <template v-else>
+          <button
+            v-for="t in templates"
+            :key="t.key"
+            class="layer-row collapsed-row"
+            :class="{ active: selectedKey === t.key }"
+            :title="t.alias || t.key"
+            @click="selectedKey = t.key"
+          >
+            <span class="dot" :style="{ background: t.color || 'var(--sw-fg-3)' }" />
+          </button>
+        </template>
       </aside>
 
       <main v-if="selectedTpl" class="detail">
@@ -514,110 +764,273 @@ function toggleComponent(key: ComponentKey): void {
             type="button"
             @click="activeScope = s"
           >
-            {{ s }}
+            {{ SCOPE_LABELS[s] }}
             <span class="count">{{ widgetsFor(s).length }}</span>
           </button>
         </nav>
 
-        <!-- Widget editor -->
-        <section class="sw-card widgets-card">
+        <!-- Widget editor: canvas + drawer.
+             Canvas (left): 12-col grid background, widgets placed at
+             their span/rowSpan. Click selects, drag header reorders,
+             drag bottom-right corner resizes. Previews use mock data
+             so the layout reads as a real dashboard without firing
+             MQE per keystroke.
+             Drawer (right): config fields for the selected widget.
+             Hidden when nothing is selected so the canvas gets the
+             full width. -->
+        <section class="sw-card editor-card">
           <div class="card-head">
-            <h4>{{ activeScope }} widgets</h4>
-            <span class="sub">12-col flow grid · uniform 180px row height · drag-free</span>
-            <button class="sw-btn add" type="button" @click="addWidget">＋ Add widget</button>
+            <h4>{{ SCOPE_LABELS[activeScope] }} widgets</h4>
+            <span class="sub">
+              click a widget to edit · drag corner to resize · drag header to reorder
+            </span>
+            <button class="sw-btn add" type="button" @click="addAndSelectWidget">＋ Add widget</button>
           </div>
 
-          <div v-if="currentWidgets.length === 0" class="empty inset">
-            No widgets defined for this scope. Click "Add widget" to start.
-          </div>
-
-          <ul v-else class="widget-list">
-            <li v-for="(w, i) in currentWidgets" :key="i" class="widget-edit">
-              <div class="we-row">
-                <div class="we-fields">
-                  <div class="row">
-                    <label>
-                      <span>id</span>
-                      <input class="mono" v-model="w.id" />
-                    </label>
-                    <label class="grow">
-                      <span>Title</span>
-                      <input v-model="w.title" />
-                    </label>
-                    <label>
-                      <span>Type</span>
-                      <select v-model="w.type">
-                        <option value="card">card</option>
-                        <option value="line">line</option>
-                        <option value="top">top</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>Unit</span>
-                      <input v-model="w.unit" placeholder="—" />
-                    </label>
-                    <label>
-                      <span>Span (1–12)</span>
-                      <input type="number" min="1" max="12" v-model.number="w.span" />
-                    </label>
-                    <label>
-                      <span>Row span</span>
-                      <input type="number" min="1" max="6" v-model.number="w.rowSpan" />
-                    </label>
-                  </div>
-                  <div class="row">
-                    <label
-                      class="grow wide"
-                      :title="visibleWhenHint(activeScope)"
-                    >
-                      <span>Visible when (optional)</span>
-                      <input
-                        class="mono"
-                        v-model="w.visibleWhen"
-                        :placeholder="visibleWhenPlaceholder(activeScope)"
-                      />
-                    </label>
-                  </div>
-                  <div class="row">
-                    <label class="grow wide">
-                      <span>MQE expressions (one per line)</span>
-                      <textarea
-                        class="mono"
-                        rows="3"
-                        :value="expressionsToText(w.expressions)"
-                        @input="w.expressions = textToExpressions(($event.target as HTMLTextAreaElement).value)"
-                      ></textarea>
-                    </label>
-                  </div>
+          <div class="editor-split" :class="{ 'has-drawer': !!selectedWidget }">
+            <div
+              ref="canvasEl"
+              class="canvas"
+              :class="{ resizing: resize.active }"
+            >
+              <div v-if="currentWidgets.length === 0" class="canvas-empty">
+                No widgets yet. Click "+ Add widget" or drag here later — the canvas
+                renders widgets as a 12-col grid with mock previews.
+              </div>
+              <div
+                v-for="(w, i) in currentWidgets"
+                :key="`${w.id}-${i}`"
+                class="canvas-widget"
+                :class="{
+                  selected: selectedIdx === i,
+                  dragging: reorder.active && reorder.from === i,
+                  'drop-target': reorder.active && reorder.over === i && reorder.from !== i,
+                }"
+                :style="widgetGridStyle(w)"
+                @click="selectWidget(i)"
+                @dragover.prevent="onReorderOver($event, i)"
+                @drop="onReorderDrop($event, i)"
+              >
+                <header
+                  class="cw-head"
+                  :draggable="true"
+                  @dragstart="onReorderStart($event, i)"
+                  @dragend="onReorderEnd"
+                >
+                  <span class="cw-grip" aria-hidden="true">
+                    <svg viewBox="0 0 10 14" width="6" height="10">
+                      <circle cx="2" cy="2" r="1" fill="currentColor"/>
+                      <circle cx="8" cy="2" r="1" fill="currentColor"/>
+                      <circle cx="2" cy="7" r="1" fill="currentColor"/>
+                      <circle cx="8" cy="7" r="1" fill="currentColor"/>
+                      <circle cx="2" cy="12" r="1" fill="currentColor"/>
+                      <circle cx="8" cy="12" r="1" fill="currentColor"/>
+                    </svg>
+                  </span>
+                  <h5>{{ w.title || w.id || 'untitled' }}</h5>
+                  <span class="cw-type" :class="`t-${w.type}`">{{ w.type }}</span>
+                </header>
+                <div class="cw-body">
+                  <template v-if="w.type === 'line' && w.expressions.length > 0">
+                    <TimeChart
+                      :series="mockLineSeries(w)"
+                      :unit="w.unit"
+                      :height="Math.max(60, widgetRowSpan(w) * 120 - 50)"
+                    />
+                  </template>
+                  <template v-else-if="w.type === 'top' && w.expressions.length > 0">
+                    <TopList
+                      :groups="mockTopGroups(w, Math.max(4, widgetRowSpan(w) * 3))"
+                      :unit="w.unit"
+                    />
+                  </template>
+                  <template v-else-if="w.type === 'card'">
+                    <div class="cw-card-value">
+                      <span class="num">{{ fmtMetric(mockCardValue(w)) }}</span>
+                      <span v-if="w.unit" class="unit">{{ w.unit }}</span>
+                    </div>
+                  </template>
+                  <template v-else-if="w.type === 'record' && w.expressions.length > 0">
+                    <!-- Record preview — mock slow-statement-like rows.
+                         The real runtime renderer will surface trace
+                         id / segment id columns; for the admin canvas
+                         we show the statement + latency only. -->
+                    <ul class="cw-records">
+                      <li
+                        v-for="(r, ri) in mockRecordRows(w, Math.max(3, widgetRowSpan(w) * 2))"
+                        :key="ri"
+                        class="cw-record-row"
+                      >
+                        <span class="rec-name">{{ r.name }}</span>
+                        <span class="rec-value">
+                          {{ fmtMetric(r.value ?? null) }}<span v-if="w.unit" class="unit">{{ w.unit }}</span>
+                        </span>
+                      </li>
+                    </ul>
+                  </template>
+                  <p v-else class="cw-empty">
+                    Add an MQE expression in the drawer to preview.
+                  </p>
                 </div>
-                <!-- All three row controls live in a single vertical
-                     stack on the right edge so up/down/✕ stay aligned
-                     regardless of how many field rows are below. -->
-                <div class="we-controls">
+                <!-- Resize handle: 12×12 dotted glyph in the bottom-
+                     right corner. Mouse-down captures the drag and
+                     updates span/rowSpan as the cursor moves. -->
+                <span
+                  class="cw-resize"
+                  title="Drag to resize"
+                  @mousedown="onResizeStart($event, i)"
+                >
+                  <svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor">
+                    <circle cx="3" cy="9" r="0.8"/>
+                    <circle cx="6" cy="9" r="0.8"/>
+                    <circle cx="9" cy="9" r="0.8"/>
+                    <circle cx="6" cy="6" r="0.8"/>
+                    <circle cx="9" cy="6" r="0.8"/>
+                    <circle cx="9" cy="3" r="0.8"/>
+                  </svg>
+                </span>
+                <span v-if="selectedIdx === i" class="cw-size-badge">
+                  {{ widgetSpan(w) }} × {{ widgetRowSpan(w) }}
+                </span>
+              </div>
+            </div>
+
+            <aside v-if="selectedWidget" class="drawer">
+              <div class="drawer-head">
+                <h4>Edit widget</h4>
+                <span class="sub">{{ SCOPE_LABELS[activeScope] }} · #{{ (selectedIdx ?? 0) + 1 }}</span>
+                <button class="sw-btn ghost close" type="button" title="Close" @click="selectedIdx = null">✕</button>
+              </div>
+              <div class="drawer-body">
+                <div class="d-row">
+                  <label>
+                    <span>id</span>
+                    <input class="mono" v-model="selectedWidget.id" />
+                  </label>
+                  <label class="grow">
+                    <span>Title</span>
+                    <input v-model="selectedWidget.title" />
+                  </label>
+                </div>
+                <div class="d-row">
+                  <label class="grow">
+                    <span>Tip (hover hint)</span>
+                    <input v-model="selectedWidget.tip" placeholder="—" />
+                  </label>
+                </div>
+                <div class="d-row">
+                  <label>
+                    <span>Type</span>
+                    <select v-model="selectedWidget.type">
+                      <option value="card">card</option>
+                      <option value="line">line</option>
+                      <option value="top">top</option>
+                      <option value="record">record</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Unit</span>
+                    <input v-model="selectedWidget.unit" placeholder="—" />
+                  </label>
+                  <label>
+                    <span>Span</span>
+                    <input type="number" min="1" max="12" v-model.number="selectedWidget.span" />
+                  </label>
+                  <label>
+                    <span>Row span</span>
+                    <input type="number" min="1" max="8" v-model.number="selectedWidget.rowSpan" />
+                  </label>
+                </div>
+                <div class="d-section">
+                  <span class="d-label">MQE expressions</span>
+                  <textarea
+                    class="mono"
+                    rows="4"
+                    :value="expressionsToText(selectedWidget.expressions)"
+                    @input="selectedWidget.expressions = textToExpressions(($event.target as HTMLTextAreaElement).value)"
+                    placeholder="one expression per line"
+                  ></textarea>
+                  <p class="d-hint">
+                    For <code>top</code> widgets, each expression becomes a tab.
+                    For <code>line</code>, each becomes a series.
+                  </p>
+                </div>
+                <div
+                  v-if="selectedWidget.type === 'top' || (selectedWidget.expressions?.length ?? 0) > 1"
+                  class="d-section"
+                >
+                  <span class="d-label">Expression labels (one per line)</span>
+                  <textarea
+                    rows="3"
+                    :value="expressionsToText(selectedWidget.expressionLabels ?? [])"
+                    @input="selectedWidget.expressionLabels = textToExpressions(($event.target as HTMLTextAreaElement).value)"
+                    :placeholder="selectedWidget.type === 'top' ? 'Traffic\nSlow\nSuccessful Rate' : 'count\nlatency'"
+                  ></textarea>
+                </div>
+                <div
+                  v-if="selectedWidget.type === 'top' || (selectedWidget.expressions?.length ?? 0) > 1"
+                  class="d-section"
+                >
+                  <span class="d-label">Expression units (one per line)</span>
+                  <textarea
+                    class="mono"
+                    rows="2"
+                    :value="expressionsToText(selectedWidget.expressionUnits ?? [])"
+                    @input="selectedWidget.expressionUnits = textToExpressions(($event.target as HTMLTextAreaElement).value)"
+                    placeholder="rpm&#10;ms&#10;%"
+                  ></textarea>
+                </div>
+                <div v-if="selectedWidget.type === 'line'" class="d-section">
+                  <span class="d-label">Y-axis index per expression (0 = left, 1 = right)</span>
+                  <input
+                    class="mono"
+                    :value="(selectedWidget.expressionAxes ?? []).join(',')"
+                    @input="selectedWidget.expressionAxes = (($event.target as HTMLInputElement).value || '').split(',').map((s) => Number(s.trim())).filter((n) => Number.isFinite(n))"
+                    placeholder="0,1"
+                  />
+                  <p class="d-hint">Comma-separated. Use for dual-axis line widgets.</p>
+                </div>
+                <div class="d-section">
+                  <span class="d-label" :title="visibleWhenHint(activeScope)">
+                    Visible when (optional)
+                  </span>
+                  <input
+                    class="mono"
+                    v-model="selectedWidget.visibleWhen"
+                    :placeholder="visibleWhenPlaceholder(activeScope)"
+                  />
+                </div>
+                <div class="d-section">
+                  <label class="d-check">
+                    <input type="checkbox" v-model="selectedWidget.layerScope" />
+                    <span>Layer-scoped (run MQE across the whole layer, ignore selected service)</span>
+                  </label>
+                </div>
+                <div class="d-actions">
                   <button
-                    class="sw-btn ghost small"
+                    class="sw-btn"
                     type="button"
-                    :disabled="i === 0"
+                    :disabled="(selectedIdx ?? 0) === 0"
                     title="Move up"
-                    @click="moveWidget(i, -1)"
-                  >↑</button>
+                    @click="moveSelected(-1)"
+                  >↑ Up</button>
                   <button
-                    class="sw-btn ghost small"
+                    class="sw-btn"
                     type="button"
-                    :disabled="i === currentWidgets.length - 1"
+                    :disabled="(selectedIdx ?? 0) >= currentWidgets.length - 1"
                     title="Move down"
-                    @click="moveWidget(i, 1)"
-                  >↓</button>
+                    @click="moveSelected(1)"
+                  >↓ Down</button>
                   <button
                     class="sw-btn danger"
                     type="button"
-                    title="Delete"
-                    @click="deleteWidget(i)"
-                  >✕</button>
+                    title="Delete widget"
+                    @click="deleteSelected"
+                  >✕ Delete</button>
                 </div>
               </div>
-            </li>
-          </ul>
+            </aside>
+          </div>
         </section>
       </main>
     </div>
@@ -676,6 +1089,10 @@ function toggleComponent(key: ComponentKey): void {
   grid-template-columns: 220px 1fr;
   gap: 14px;
   align-items: start;
+  transition: grid-template-columns 160ms ease;
+}
+.grid.list-collapsed {
+  grid-template-columns: 36px 1fr;
 }
 .layer-list {
   padding: 8px;
@@ -686,7 +1103,56 @@ function toggleComponent(key: ComponentKey): void {
   position: sticky;
   top: 16px;
 }
+.layer-list.collapsed {
+  padding: 6px 4px;
+}
+.list-toggle {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin-right: 4px;
+  background: transparent;
+  border: none;
+  color: var(--sw-fg-3);
+  cursor: pointer;
+  font: inherit;
+  border-radius: 3px;
+  display: inline-grid;
+  place-items: center;
+}
+.list-toggle:hover {
+  background: var(--sw-bg-2);
+  color: var(--sw-fg-1);
+}
+.list-toggle .caret {
+  display: inline-block;
+  font-size: 13px;
+  line-height: 1;
+  transition: transform 0.15s;
+}
+.list-toggle .caret.open {
+  transform: rotate(90deg);
+}
+.collapsed-row {
+  justify-content: center;
+  padding: 6px 4px;
+}
+.collapsed-row .dot {
+  width: 10px;
+  height: 10px;
+}
+.layer-list.collapsed .list-head {
+  border-bottom: 1px solid var(--sw-line);
+  padding: 4px 0 6px;
+  justify-content: center;
+}
+.layer-list.collapsed .list-toggle {
+  margin-right: 0;
+}
 .list-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   padding: 6px 10px 10px;
   border-bottom: 1px solid var(--sw-line);
   margin-bottom: 6px;
@@ -977,7 +1443,7 @@ function toggleComponent(key: ComponentKey): void {
   color: #f87171;
 }
 
-.widgets-card { padding: 0; }
+.editor-card { padding: 0; }
 .card-head {
   display: flex;
   align-items: baseline;
@@ -1003,57 +1469,281 @@ function toggleComponent(key: ComponentKey): void {
   color: var(--sw-accent-2);
   border-color: var(--sw-accent-line);
 }
+.sw-btn.danger {
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+.sw-btn.danger:hover {
+  background: var(--sw-err-soft);
+}
 
-.widget-list {
+/* Editor split: canvas (left, flex 1) + drawer (right, 360px when
+ * a widget is selected). When nothing is selected, the canvas takes
+ * the full width so the operator sees the layout as it would render. */
+.editor-split {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  min-height: 480px;
+}
+.editor-split.has-drawer {
+  grid-template-columns: 1fr 360px;
+}
+
+/* Canvas — 12-col grid with dotted-line background to evoke the
+ * underlying layout. Cell pitch matches the runtime dashboard
+ * (120px rows, 8px gap). */
+.canvas {
+  position: relative;
+  padding: 12px;
+  background:
+    linear-gradient(var(--sw-line) 1px, transparent 1px) 0 0/24px 24px,
+    linear-gradient(90deg, var(--sw-line) 1px, transparent 1px) 0 0/24px 24px,
+    var(--sw-bg-0);
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  grid-auto-rows: 120px;
+  gap: 8px;
+  min-height: 480px;
+  border-right: 1px solid var(--sw-line);
+}
+.editor-split:not(.has-drawer) .canvas { border-right: none; }
+.canvas.resizing {
+  cursor: nwse-resize;
+  user-select: none;
+}
+.canvas-empty {
+  grid-column: span 12;
+  border: 1.5px dashed var(--sw-line-2);
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  color: var(--sw-fg-3);
+  font-size: 11.5px;
+  padding: 24px;
+  min-height: 120px;
+}
+
+/* Widget tile — clickable card with title, type chip, preview, and
+ * resize handle. Selected state mirrors the design draft: orange
+ * outline + soft glow. */
+.canvas-widget {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--sw-bg-1);
+  border: 1px solid var(--sw-line);
+  border-radius: 6px;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.canvas-widget:hover {
+  border-color: var(--sw-line-2);
+}
+.canvas-widget.selected {
+  border-color: var(--sw-accent);
+  box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.18);
+}
+.canvas-widget.dragging {
+  opacity: 0.35;
+}
+.canvas-widget.drop-target {
+  border-color: var(--sw-accent-line);
+  box-shadow: inset 0 0 0 1px var(--sw-accent-line);
+}
+.cw-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 6px 6px;
+  border-bottom: 1px solid var(--sw-line);
+  background: var(--sw-bg-2);
+  cursor: grab;
+  user-select: none;
+}
+.cw-head:active { cursor: grabbing; }
+.cw-head h5 {
+  margin: 0;
+  flex: 1;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--sw-fg-0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cw-grip {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  color: var(--sw-fg-3);
+  flex: 0 0 14px;
+}
+.cw-type {
+  font-size: 9.5px;
+  font-family: var(--sw-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--sw-bg-3);
+  color: var(--sw-fg-2);
+}
+.cw-type.t-line   { color: #60a5fa; background: rgba(96, 165, 250, 0.12); }
+.cw-type.t-top    { color: #a78bfa; background: rgba(167, 139, 250, 0.12); }
+.cw-type.t-card   { color: var(--sw-accent-2); background: var(--sw-accent-soft); }
+.cw-type.t-record { color: #22d3ee; background: rgba(34, 211, 238, 0.12); }
+.cw-body {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 8px 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.cw-empty {
+  margin: auto;
+  font-size: 10.5px;
+  color: var(--sw-fg-3);
+  text-align: center;
+  padding: 8px 12px;
+}
+.cw-card-value {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  padding: 8px;
+}
+.cw-card-value .num {
+  font-family: var(--sw-mono);
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--sw-fg-0);
+  font-variant-numeric: tabular-nums;
+}
+.cw-card-value .unit {
+  font-size: 11px;
+  color: var(--sw-fg-3);
+}
+.cw-records {
   list-style: none;
   margin: 0;
   padding: 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
-.widget-edit {
+.cw-record-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 4px;
+  border-bottom: 1px dashed var(--sw-line);
+}
+.cw-record-row:last-child { border-bottom: none; }
+.rec-name {
+  flex: 1;
+  font-family: var(--sw-mono);
+  font-size: 10.5px;
+  color: var(--sw-fg-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rec-value {
+  font-family: var(--sw-mono);
+  font-size: 10.5px;
+  color: var(--sw-fg-0);
+  font-variant-numeric: tabular-nums;
+}
+.rec-value .unit {
+  margin-left: 2px;
+  color: var(--sw-fg-3);
+  font-size: 9.5px;
+}
+.cw-resize {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 16px;
+  height: 16px;
+  display: inline-grid;
+  place-items: end;
+  padding: 2px;
+  color: var(--sw-fg-3);
+  cursor: nwse-resize;
+  border-radius: 3px;
+  z-index: 2;
+}
+.cw-resize:hover { color: var(--sw-accent); background: rgba(249, 115, 22, 0.08); }
+.cw-size-badge {
+  position: absolute;
+  top: 6px;
+  right: 26px;
+  font-family: var(--sw-mono);
+  font-size: 9.5px;
+  padding: 1px 6px;
+  background: var(--sw-accent);
+  color: #0a0d12;
+  border-radius: 3px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+/* Right-side drawer — config fields. Sticky inside the card so it
+ * stays in view as the operator scrolls through long expression
+ * lists. */
+.drawer {
+  display: flex;
+  flex-direction: column;
+  background: var(--sw-bg-1);
+  border-left: 1px solid var(--sw-line);
+  max-height: calc(100vh - 120px);
+}
+.drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--sw-line);
 }
-.widget-edit:last-child { border-bottom: none; }
-.we-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 12px 16px;
+.drawer-head h4 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sw-fg-0);
 }
-.we-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  align-self: flex-start;
-  /* Push down so the top button aligns with the FIRST input row,
-   * skipping the field labels above. Label is ~13.5px + 3px gap. */
-  padding-top: 17px;
+.drawer-head .sub {
+  font-size: 10.5px;
+  color: var(--sw-fg-3);
+  text-transform: capitalize;
 }
-.we-controls .sw-btn {
-  width: 28px;
+.drawer-head .close {
+  margin-left: auto;
+  width: 24px;
   height: 24px;
   padding: 0;
-  font-size: 11px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: inline-grid;
+  place-items: center;
+  font-size: 12px;
 }
-.we-controls .sw-btn[disabled] {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-.we-fields {
-  flex: 1;
-  min-width: 0;
+.drawer-body {
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+  overflow-y: auto;
 }
-.row {
+.d-row {
   display: flex;
-  flex-wrap: wrap;
   gap: 8px;
+  flex-wrap: wrap;
 }
-.row label {
+.d-row label {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -1061,11 +1751,9 @@ function toggleComponent(key: ComponentKey): void {
   color: var(--sw-fg-3);
   flex: 0 1 auto;
 }
-.row label.grow { flex: 1 1 auto; min-width: 140px; }
-.row label.wide { flex: 1 1 100%; }
-.row input,
-.row select,
-.row textarea {
+.d-row label.grow { flex: 1 1 100%; min-width: 0; }
+.d-row input,
+.d-row select {
   height: 26px;
   padding: 0 8px;
   background: var(--sw-bg-2);
@@ -1074,35 +1762,83 @@ function toggleComponent(key: ComponentKey): void {
   color: var(--sw-fg-0);
   font: inherit;
   font-size: 11.5px;
+  min-width: 0;
 }
-.row textarea {
-  height: auto;
-  padding: 6px 8px;
-  resize: vertical;
-}
-.row input.mono,
-.row textarea.mono {
+.d-row input.mono {
   font-family: var(--sw-mono);
   font-size: 11px;
 }
-.row input:focus,
-.row select:focus,
-.row textarea:focus {
+.d-row input:focus,
+.d-row select:focus {
   outline: none;
   border-color: var(--sw-accent-line);
 }
-.sw-btn.danger {
-  border-color: rgba(239, 68, 68, 0.3);
-  color: #f87171;
+.d-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-.sw-btn.danger:hover {
-  background: var(--sw-err-soft);
+.d-label {
+  font-size: 10.5px;
+  color: var(--sw-fg-3);
 }
-.we-controls .sw-btn.danger {
-  /* Sized through .we-controls .sw-btn — no width/height override. */
-  margin-top: 4px;
-  border-top: 1px solid var(--sw-line);
-  padding-top: 0;
+.d-section input,
+.d-section textarea {
+  background: var(--sw-bg-2);
+  border: 1px solid var(--sw-line-2);
   border-radius: 4px;
+  color: var(--sw-fg-0);
+  font: inherit;
+  font-size: 11.5px;
+  padding: 6px 8px;
 }
+.d-section input { height: 26px; padding: 0 8px; }
+.d-section textarea { resize: vertical; }
+.d-section input.mono,
+.d-section textarea.mono {
+  font-family: var(--sw-mono);
+  font-size: 11px;
+}
+.d-section input:focus,
+.d-section textarea:focus {
+  outline: none;
+  border-color: var(--sw-accent-line);
+}
+.d-hint {
+  font-size: 10px;
+  color: var(--sw-fg-3);
+  margin: 2px 0 0;
+  line-height: 1.4;
+}
+.d-hint code {
+  font-family: var(--sw-mono);
+  padding: 0 3px;
+  background: var(--sw-bg-2);
+  border-radius: 2px;
+  color: var(--sw-fg-1);
+}
+.d-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--sw-fg-1);
+  cursor: pointer;
+  user-select: none;
+  line-height: 1.4;
+}
+.d-check input {
+  margin-top: 2px;
+  accent-color: var(--sw-accent);
+}
+.d-actions {
+  display: flex;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--sw-line);
+  margin-top: 4px;
+}
+.d-actions .sw-btn { font-size: 11px; }
+.d-actions .sw-btn.danger { margin-left: auto; }
+.d-actions .sw-btn[disabled] { opacity: 0.35; pointer-events: none; }
 </style>

@@ -29,7 +29,20 @@
  * Phase 7 admin lets operators edit + persist their own widget set.
  */
 
-export type DashboardWidgetType = 'card' | 'line' | 'top';
+/**
+ * Built-in widget renderers.
+ *
+ *   card   — single scalar (avg across the window)
+ *   line   — one labeled series per expression
+ *   top    — sorted list with optional tab-switchable expressions
+ *   record — tabular record list, one row per RECORD-typed MQE result.
+ *            Used for "slow statements" / slow-SQL widgets and similar
+ *            row-level views where each entry has a name + value +
+ *            optional refs (trace id, span id) rather than a metric
+ *            sample. The runtime is responsible for the table render;
+ *            the admin canvas previews with mock rows.
+ */
+export type DashboardWidgetType = 'card' | 'line' | 'top' | 'record';
 
 /**
  * Per-entity dashboard scope. Each layer carries an independent widget
@@ -55,7 +68,9 @@ export type DashboardScope =
   | 'topology'
   | 'trace'
   | 'logs'
-  | 'profiling';
+  | 'traceProfiling'
+  | 'ebpfProfiling'
+  | 'asyncProfiling';
 
 export interface DashboardWidget {
   /** Stable id within the layer's dashboard. */
@@ -149,6 +164,29 @@ export interface DashboardTopItem {
   value: number | null;
 }
 
+/**
+ * One row in a `record` widget. RECORD-typed MQE results (e.g. slow
+ * SQL statements) carry a primary name (the statement / endpoint /
+ * event), a metric value (latency / duration), and optional refs the
+ * UI can link to (trace id / span id / instance). All fields except
+ * `name` are optional so different record families can share the
+ * shape.
+ */
+export interface DashboardRecordItem {
+  /** Display label — for slow SQL this is the statement text. */
+  name: string;
+  /** Primary metric value (typically latency in ms). */
+  value?: number | null;
+  /** Optional row-level refs to drill into the originating trace. */
+  traceId?: string;
+  segmentId?: string;
+  spanId?: string;
+  /** Sortable timestamp in ms since epoch when present. */
+  timestamp?: number;
+  /** Free-form extra columns the UI can surface as a side note. */
+  extra?: Record<string, string | number | null>;
+}
+
 export interface DashboardWidgetResult {
   id: string;
   /** Set when every MQE expression for this widget errored. */
@@ -174,6 +212,10 @@ export interface DashboardWidgetResult {
     unit?: string;
     items: DashboardTopItem[];
   }>;
+  /** `record` payload — one row per RECORD-typed MQE entry. The first
+   *  expression drives the list; subsequent expressions are ignored for
+   *  now (a future iteration could promote them to extra columns). */
+  records?: DashboardRecordItem[];
 }
 
 export interface DashboardResponse {

@@ -46,8 +46,17 @@ export interface LayerCaps {
   dashboards?: boolean;
   traces?: boolean;
   logs?: boolean;
-  profiling?: boolean;
+  /** Trace-driven thread profiling (the original SkyWalking profile). */
+  traceProfiling?: boolean;
+  /** Kernel-level CPU / off-CPU profiling sourced from eBPF agents. */
+  ebpfProfiling?: boolean;
+  /** JVM async-profiler integration (Java-only). */
+  asyncProfiling?: boolean;
   events?: boolean;
+  /** Bundle a dedicated square tile per layer on the Overview strip,
+   *  showing live service count. When on, regular tiles drop the
+   *  "N services" counter from their header (no duplicate). */
+  serviceCountTile?: boolean;
 }
 
 /**
@@ -67,29 +76,90 @@ export interface LayerMetricsColumn {
 }
 
 /**
- * Metrics block on a layer template — defines the columns used
- * across the service list, plus the default sort. Overview-tile
- * settings (headline metric, trend metric) live separately on
- * `LayerOverviewConfig` since they're only used by the Overview
- * page; this block drives the service list table on the per-layer
- * page.
+ * Per-layer page header / service-list config — drives the service
+ * picker table on the per-layer Service page (RPM / Apdex / Error
+ * Rate columns + their default sort).
+ *
+ * Renamed from `metrics` in the JSON to `layer-header` to reflect
+ * where the data actually surfaces; the old `metrics` key is still
+ * accepted by the loader for back-compat. Overview tile config lives
+ * separately on `LayerOverviewConfig` with its own self-contained
+ * metrics.
  */
-export interface LayerMetricsConfig {
+export interface LayerHeaderConfig {
   /** Default sort metric for the service list. */
   orderBy?: string;
   columns?: LayerMetricsColumn[];
 }
 
+/** @deprecated alias kept for callers — same shape as LayerHeaderConfig. */
+export type LayerMetricsConfig = LayerHeaderConfig;
+
 /**
- * Overview-page-only settings. The per-layer compact tile on the
- * Overview's top strip picks its big headline value and its
- * trend-line metric from here. Both reference metric keys present
- * in `LayerMetricsConfig.columns`.
+ * One self-contained metric on the Overview tile. Each carries its own
+ * MQE expression + label + presentation hints; the Overview tile does
+ * NOT cross-reference the per-layer header columns any more.
+ *
+ * `id` is optional in source JSON — the loader assigns `ov_0`,
+ * `ov_1`, … on load so the SPA has a stable key to thread through
+ * the landing query (the BFF treats each as a synthetic column).
+ */
+export interface OverviewMetric {
+  id?: string;
+  label: string;
+  mqe: string;
+  /** Hover tip (string only, no markdown). */
+  tip?: string;
+  unit?: string;
+  aggregation?: 'sum' | 'avg';
+  scale?: number;
+  precision?: number;
+}
+
+/**
+ * One Overview tile **group** — a layer can have multiple groups, each
+ * rendered as its own tile in the Overview strip. The group is the
+ * unit of layout decisions:
+ *
+ *   - `title`  is shown in the tile header, alongside the layer name.
+ *     Operators use it to label a group's purpose (e.g. "Throughput",
+ *     "Health", "Cache hit rate").
+ *   - `size`   = "auto" (full tile with up to 3 metric cells, 5/row)
+ *               or "square" (compact 1-metric tile, 8/row).
+ *     Square is for at-a-glance density; the recommendation is to put
+ *     exactly ONE metric in a square group — the layer's primary
+ *     headline (RPM for services, Msg/s for MQ, QPS for DB, …).
+ *   - `metrics` are self-contained `OverviewMetric` entries (mqe +
+ *     label + tip + unit + aggregation + scale + precision).
+ */
+export interface OverviewGroup {
+  title: string;
+  size: 'auto' | 'square';
+  metrics: OverviewMetric[];
+}
+
+/**
+ * Overview-page-only settings. A layer's overview is now a list of
+ * groups; each group becomes one tile in the Overview strip. Most
+ * layers carry a single auto-size group (the headline metrics), and
+ * may add additional square groups to surface a primary KPI in dense
+ * fleet views.
+ *
+ * Legacy shapes (migrated at load time):
+ *   - `metrics: OverviewMetric[]`   → wrapped into a single group
+ *                                     `{title: '', size: 'auto'}`.
+ *   - `metrics: string[]` of column-key refs → resolved against
+ *                                     `layer-header.columns` then
+ *                                     wrapped as above.
+ *   - `throughput` / `spark` (oldest) → resolved same way.
  */
 export interface LayerOverviewConfig {
-  /** Metric key for the Overview tile's big headline value. */
+  groups?: OverviewGroup[];
+  /** @deprecated — wrapped into a single auto-size group on load. */
+  metrics?: OverviewMetric[];
+  /** @deprecated — migrated to the first group's first metric. */
   throughput?: string;
-  /** Metric key for the Overview tile's trend line. */
+  /** @deprecated — sparkline follows the headline metric. */
   spark?: string;
 }
 
@@ -109,13 +179,17 @@ export interface LayerDef {
   documentLink?: string;
   slots: LayerSlots;
   caps: LayerCaps;
-  /** Per-layer metric config from the JSON template; UI uses it as
-   *  the source of truth for the service-list columns + default
-   *  sort. Falls back to static catalog defaults when absent. */
-  metrics?: LayerMetricsConfig;
-  /** Overview-tile settings — the headline metric + trend metric on
-   *  the per-layer compact tile in the Overview's top strip. Empty
-   *  when the layer template omits the `overview` block. */
+  /** Per-layer page header / service-list table config. Came from the
+   *  JSON template's `layer-header` block (or legacy `metrics`). UI
+   *  uses it for the per-layer Service page picker columns. Falls
+   *  back to static catalog defaults when absent. */
+  header?: LayerHeaderConfig;
+  /** @deprecated — same data as `header`. Kept for back-compat with
+   *  callers reading the old field name. */
+  metrics?: LayerHeaderConfig;
+  /** Overview-tile settings — the 1 – 3 self-contained metric cells
+   *  on the per-layer Overview tile. Empty when the layer template
+   *  omits the `overview` block. */
   overview?: LayerOverviewConfig;
 }
 

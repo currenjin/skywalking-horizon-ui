@@ -36,8 +36,6 @@ function layerRoute(): RouteRecordRaw {
   // their JSON template `components.*` flag still gates the sidebar
   // entry, this just keeps the URL routing legible.
   const placeholderTabs: { path: string; label: string; phase: string }[] = [
-    { path: 'topology', label: 'Topology', phase: 'Phase 4' },
-    { path: 'dependency', label: 'API dependency', phase: 'Phase 4' },
     { path: 'logs', label: 'Logs', phase: 'Phase 5' },
   ];
   return {
@@ -53,8 +51,18 @@ function layerRoute(): RouteRecordRaw {
       { path: 'service', component: () => import('@/views/layer/LayerDashboardsView.vue') },
       { path: 'instance', component: () => import('@/views/layer/LayerDashboardsView.vue') },
       { path: 'endpoint', component: () => import('@/views/layer/LayerDashboardsView.vue') },
+      { path: 'topology', component: () => import('@/views/layer/LayerServiceMapView.vue') },
+      { path: 'dependency', component: () => import('@/views/layer/LayerEndpointDependencyView.vue') },
       { path: 'trace', component: () => import('@/views/layer/LayerDashboardsView.vue') },
-      { path: 'profiling', component: () => import('@/views/layer/LayerDashboardsView.vue') },
+      { path: 'trace-profiling', component: () => import('@/views/layer/LayerDashboardsView.vue') },
+      { path: 'ebpf-profiling', component: () => import('@/views/layer/LayerDashboardsView.vue') },
+      { path: 'async-profiling', component: () => import('@/views/layer/LayerDashboardsView.vue') },
+      // Old single-profiling URL → redirect to the trace-profiling page
+      // for back-compat with bookmarks taken before the split.
+      {
+        path: 'profiling',
+        redirect: (to) => ({ path: `/layer/${to.params.layerKey}/trace-profiling`, query: to.query }),
+      },
       // Legacy routes redirect to /service.
       {
         path: 'services',

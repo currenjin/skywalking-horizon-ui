@@ -144,7 +144,10 @@ const layerKpis = computed<HeaderKpi[]>(() => {
   for (const col of c.landing.columns.slice(0, 5)) {
     const m = metricMeta(col.metric);
     out.push({
-      label: col.label || m.label,
+      // Catalog label wins when the persisted `col.label` is a
+       // stale no-op (raw metric key, lowercase or empty). Operators
+       // who set a custom label still get it shown.
+      label: col.label && col.label !== col.metric ? col.label : m.label,
       value: a?.metrics?.[col.metric] ?? null,
       unit: col.unit || m.unit,
       color: colorForMetric(col.metric),
@@ -171,7 +174,10 @@ const serviceKpis = computed<HeaderKpi[]>(() => {
   for (const col of c.landing.columns.slice(0, 5)) {
     const m = metricMeta(col.metric);
     out.push({
-      label: col.label || m.label,
+      // Catalog label wins when the persisted `col.label` is a
+       // stale no-op (raw metric key, lowercase or empty). Operators
+       // who set a custom label still get it shown.
+      label: col.label && col.label !== col.metric ? col.label : m.label,
       value: row.metrics[col.metric] ?? null,
       unit: col.unit || m.unit,
       color: colorForMetric(col.metric),

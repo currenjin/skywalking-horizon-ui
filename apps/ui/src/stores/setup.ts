@@ -30,7 +30,6 @@ import { bffClient } from '@/api/client';
 import {
   defaultColumnsForLayer,
   defaultOrderByForLayer,
-  defaultSparkForLayer,
 } from '@/composables/metricCatalog';
 
 export type { LayerConfig, LandingConfig };
@@ -81,51 +80,94 @@ function defaultAggregationFor(metricKey: string): AggregationKind {
  */
 export function defaultLandingFor(
   layerKey: string,
-  fromTemplate?: LayerMetricsConfig,
+  fromHeader?: LayerMetricsConfig,
   fromOverview?: LayerOverviewConfig,
 ): LandingConfig {
-  if (fromTemplate?.columns && fromTemplate.columns.length > 0) {
-    const cols = fromTemplate.columns.map((c) => ({
-      metric: c.metric,
-      label: c.label,
-      ...(c.unit ? { unit: c.unit } : {}),
-      ...(c.mqe ? { mqe: c.mqe } : {}),
-      aggregation: c.aggregation ?? defaultAggregationFor(c.metric),
-      ...(c.scale !== undefined ? { scale: c.scale } : {}),
-      ...(c.precision !== undefined ? { precision: c.precision } : {}),
-    }));
-    const orderBy = fromTemplate.orderBy ?? cols[0].metric;
-    const throughputMetric = fromOverview?.throughput ?? orderBy;
-    const sparkMetric = fromOverview?.spark ?? throughputMetric;
-    return {
-      priority: defaultPriority(layerKey),
-      topN: 5,
-      orderBy,
-      columns: cols,
-      spark: { metric: sparkMetric, height: 28 },
-      throughput: {
-        metric: throughputMetric,
-        aggregation: defaultAggregationFor(throughputMetric),
-      },
-      style: 'table',
-    };
+  // ---- Per-layer page header (service-list columns + default sort).
+  //      Drives the per-layer Service page's picker table. Overview is
+  //      now self-contained and does NOT cross-reference these. ----
+  const headerCols = fromHeader?.columns && fromHeader.columns.length > 0
+    ? fromHeader.columns.map((c) => ({
+        metric: c.metric,
+        label: c.label,
+        ...(c.unit ? { unit: c.unit } : {}),
+        ...(c.mqe ? { mqe: c.mqe } : {}),
+        aggregation: c.aggregation ?? defaultAggregationFor(c.metric),
+        ...(c.scale !== undefined ? { scale: c.scale } : {}),
+        ...(c.precision !== undefined ? { precision: c.precision } : {}),
+      }))
+    : defaultColumnsForLayer(layerKey).map((c) => ({
+        ...c,
+        aggregation: defaultAggregationFor(c.metric),
+      }));
+  const orderBy = fromHeader?.orderBy ?? headerCols[0]?.metric ?? defaultOrderByForLayer(layerKey);
+
+  // ---- Overview tile groups. Each group becomes one tile on the
+  //      Overview strip with its own title + size. Metrics inside a
+  //      group are still self-contained (mqe / label / aggregation),
+  //      promoted into synthetic landing columns so the BFF batches
+  //      every Overview MQE in the same query. ----
+  let counter = 0;
+  const ovCols: LandingConfig['columns'] = [];
+  const overviewGroups: NonNullable<LandingConfig['overviewGroups']> = [];
+  const sourceGroups = fromOverview?.groups ??
+    (fromOverview?.metrics && fromOverview.metrics.length > 0
+      ? [{ title: '', size: 'auto' as const, metrics: fromOverview.metrics }]
+      : []);
+  for (const g of sourceGroups) {
+    const ids: string[] = [];
+    for (const m of g.metrics) {
+      const id = m.id ?? `ov_${counter++}`;
+      // Dedupe across groups: if two groups reference the same id, the
+      // column lands once and both groups share the result.
+      if (!ovCols.some((c) => c.metric === id)) {
+        ovCols.push({
+          metric: id,
+          label: m.label,
+          ...(m.tip ? { tip: m.tip } : {}),
+          ...(m.unit ? { unit: m.unit } : {}),
+          mqe: m.mqe,
+          aggregation: m.aggregation ?? defaultAggregationFor(id),
+          ...(m.scale !== undefined ? { scale: m.scale } : {}),
+          ...(m.precision !== undefined ? { precision: m.precision } : {}),
+        });
+      }
+      ids.push(id);
+    }
+    overviewGroups.push({
+      title: g.title ?? '',
+      size: g.size === 'square' ? 'square' : 'auto',
+      metricIds: ids,
+    });
   }
-  // Static fallback for layers with no JSON template.
-  const cols = defaultColumnsForLayer(layerKey).map((c) => ({
-    ...c,
-    aggregation: defaultAggregationFor(c.metric),
-  }));
-  const sparkMetric = defaultSparkForLayer(layerKey);
+  const ovIds = ovCols.map((c) => c.metric);
+
+  // Combine: header columns first (so order-by lookups stay stable),
+  // then Overview metrics. Duplicates collapse — Overview wins because
+  // it carries the operator's intent for the tile.
+  const combined: LandingConfig['columns'] = [];
+  for (const c of headerCols) {
+    if (!ovIds.includes(c.metric)) combined.push(c);
+  }
+  for (const c of ovCols) combined.push(c);
+
+  const headline = ovIds[0] ?? orderBy;
   return {
     priority: defaultPriority(layerKey),
     topN: 5,
-    orderBy: defaultOrderByForLayer(layerKey),
-    columns: cols,
-    spark: { metric: sparkMetric, height: 28 },
+    orderBy,
+    columns: combined,
+    spark: { metric: headline, height: 28 },
     throughput: {
-      metric: defaultOrderByForLayer(layerKey),
-      aggregation: defaultAggregationFor(defaultOrderByForLayer(layerKey)),
+      metric: headline,
+      aggregation: defaultAggregationFor(headline),
     },
+    // Flat list of overview metric ids (legacy back-compat for any
+    // code path still reading it). Same set, flattened from groups.
+    overviewMetrics: ovIds.length > 0 ? ovIds : [orderBy],
+    overviewGroups: overviewGroups.length > 0
+      ? overviewGroups
+      : [{ title: '', size: 'auto', metricIds: [orderBy] }],
     style: 'table',
   };
 }
@@ -217,6 +259,49 @@ export const useSetupStore = defineStore('setup', () => {
     if (!cfg) {
       cfg = defaultLayerConfig(layerKey, defaults);
       configs[layerKey] = cfg;
+    } else {
+      // Reconcile stale persisted state — three issues to patch:
+      //   1. caps fields added after the persisted snapshot. We fill
+      //      undefined caps from the template defaults so checkbox
+      //      toggles read the right state (undefined → defaults).
+      //   2. overview groups / metric ids that don't resolve to any
+      //      column → seed the fresh group set.
+      //   3. columns that DO resolve but carry stale data (empty mqe
+      //      from an old schema) → patch the missing fields from the
+      //      fresh template. Operator-edited fields stay untouched
+      //      (we never overwrite a non-empty persisted value).
+      for (const [k, v] of Object.entries(defaults.caps)) {
+        const key = k as keyof typeof cfg.caps;
+        if (cfg.caps[key] === undefined) cfg.caps[key] = v;
+      }
+      const fresh = defaultLandingFor(layerKey, defaults.metrics, defaults.overview);
+      // Patch / add columns from the fresh template — only fields
+      // that are missing on the persisted column get filled. mqe is
+      // the common stale field; this is also where label fixes from
+      // a renamed catalog land for un-customized columns.
+      for (const fc of fresh.columns) {
+        const existing = cfg.landing.columns.find((c) => c.metric === fc.metric);
+        if (!existing) {
+          cfg.landing.columns.push(fc);
+          continue;
+        }
+        if (!existing.mqe && fc.mqe) existing.mqe = fc.mqe;
+        if (existing.label === existing.metric && fc.label) existing.label = fc.label;
+        if (!existing.unit && fc.unit) existing.unit = fc.unit;
+        if (!existing.aggregation && fc.aggregation) existing.aggregation = fc.aggregation;
+        if (!existing.tip && fc.tip) existing.tip = fc.tip;
+      }
+      // Refresh overviewMetrics / overviewGroups when persisted state
+      // is stale (missing groups, or ids that don't resolve).
+      const ids = cfg.landing.overviewMetrics ?? [];
+      const allResolve = ids.length > 0 && ids.every(
+        (id) => cfg.landing.columns.some((c) => c.metric === id),
+      );
+      const hasGroups = (cfg.landing.overviewGroups?.length ?? 0) > 0;
+      if (!allResolve || !hasGroups) {
+        cfg.landing.overviewMetrics = fresh.overviewMetrics;
+        cfg.landing.overviewGroups = fresh.overviewGroups;
+      }
     }
     return cfg;
   }

@@ -14,47 +14,34 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 -->
+<!--
+  Cross-layer landing. Two visible elements:
+   1. Per-layer KPI strip — each reporting layer gets a tile carrying
+      service count + 1 – 3 aggregated metric cells (operator-configured
+      via the layer template's `overview.metrics`). Aggregation is the
+      column's `aggregation` field (sum / avg), computed BFF-side.
+      Strip is capped at 5 per row × 2 rows = 10 layers max, ordered
+      by priority + display name.
+   2. Alarms rail — recent active alarms, read-only.
+
+  Overview does NOT surface per-layer service lists — those live on the
+  per-layer Service page. Cross-layer service detail isn't a supported
+  Overview concept; the page is a fleet-level glance.
+-->
 <script setup lang="ts">
 import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
 import { useLayers } from '@/composables/useLayers';
 import { useLandingOrder } from '@/composables/useLandingOrder';
-import AlarmsPanel from './AlarmsPanel.vue';
-import LayerKpiStripCard from './LayerKpiStripCard.vue';
-import LayerKpiTile from './LayerKpiTile.vue';
-import LayerLandingCard from './LayerLandingCard.vue';
+import OverviewBody from './OverviewBody.vue';
 
 const { availableLayers, oapReachable, oapError, isLoading } = useLayers();
 const orderedLayers = useLandingOrder(availableLayers);
-
-/* Top 6 only — beyond six the page gets noisy and the user has to
- * scroll past low-priority layers to reach the Alarms / Throughput
- * panels. Operators with >6 reporting layers can re-order via setup
- * to surface the ones that matter on the Overview. */
-const topSix = computed(() => orderedLayers.value.slice(0, 6));
-/* Featured pair = top-2 by priority. These get the full LayerLandingCard
- * with the topN service table. */
-const featured = computed(() => topSix.value.slice(0, 2));
-/* The next 4 render as compact LayerKpiTile (KPI + sparkline + inline
- * aggregates, no service table). 4 fits a 2×2 grid neatly. */
-const compact = computed(() => topSix.value.slice(2, 6));
-const overflow = computed(() => Math.max(0, orderedLayers.value.length - 6));
 const empty = computed(() => !isLoading.value && orderedLayers.value.length === 0);
 </script>
 
 <template>
   <div class="overview">
-    <header class="page-head">
-      <div>
-        <div class="kicker">Overview</div>
-        <h1>Cross-layer landing</h1>
-        <p class="lede">
-          The top 2 layers (by priority) get full top-N cards; the next 4 render as compact KPI
-          tiles. Adjust priority, columns, aggregation, and the throughput metric in
-          <RouterLink to="/setup">Overview setup</RouterLink>.
-        </p>
-      </div>
-    </header>
 
     <div v-if="!oapReachable && !isLoading" class="banner err">
       <strong>OAP unreachable.</strong>
@@ -65,7 +52,7 @@ const empty = computed(() => !isLoading.value && orderedLayers.value.length === 
       <div class="empty-card">
         <h2>No layer is reporting services yet</h2>
         <p>
-          Once data starts flowing through OAP, every reporting layer appears here automatically,
+          Once data flows through OAP, every reporting layer appears here automatically,
           ordered by the priority you assign in
           <RouterLink to="/setup">Overview setup</RouterLink>.
         </p>
@@ -73,34 +60,12 @@ const empty = computed(() => !isLoading.value && orderedLayers.value.length === 
       </div>
     </div>
 
-    <template v-else>
-      <!-- Top KPI strip: per-layer cards (service count + throughput
-           value + sparkline). Adopts the design's KPI-strip style at
-           landing.jsx:30-38. Auto-fit grid so a 3-layer strip doesn't
-           leave 3 ghost columns. -->
-      <div class="kpi-strip">
-        <LayerKpiStripCard v-for="L in topSix" :key="L.key" :layer="L" />
-      </div>
-
-      <!-- Detail grid: 2 featured cards + 4 compact tiles + alarms rail. -->
-      <div class="overview-grid">
-        <LayerLandingCard
-          v-for="L in featured"
-          :key="L.key"
-          :layer="L"
-          :class="`featured featured-${featured.indexOf(L) + 1}`"
-        />
-        <AlarmsPanel class="alarms-rail" />
-        <div class="compact-grid">
-          <LayerKpiTile v-for="L in compact" :key="L.key" :layer="L" />
-        </div>
-        <div v-if="overflow > 0" class="overflow-note">
-          {{ overflow }} more layer{{ overflow === 1 ? '' : 's' }} not shown.
-          <RouterLink to="/setup">Re-order via setup</RouterLink>
-          to surface them.
-        </div>
-      </div>
-    </template>
+    <OverviewBody
+      v-else
+      :layers="orderedLayers"
+      :show-overflow-note="true"
+      :show-alarms="true"
+    />
   </div>
 </template>
 
@@ -110,9 +75,7 @@ const empty = computed(() => !isLoading.value && orderedLayers.value.length === 
   max-width: 1440px;
   margin: 0 auto;
 }
-.page-head {
-  margin-bottom: 18px;
-}
+.page-head { margin-bottom: 18px; }
 .kicker {
   font-size: 10px;
   text-transform: uppercase;
@@ -134,6 +97,14 @@ const empty = computed(() => !isLoading.value && orderedLayers.value.length === 
   margin: 0;
   max-width: 720px;
 }
+.lede code {
+  font-family: var(--sw-mono);
+  font-size: 11px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--sw-bg-2);
+  color: var(--sw-fg-1);
+}
 .lede a {
   color: var(--sw-accent-2);
   text-decoration: none;
@@ -148,9 +119,7 @@ const empty = computed(() => !isLoading.value && orderedLayers.value.length === 
   font-size: 12px;
   line-height: 1.5;
 }
-.empty {
-  margin-top: 20px;
-}
+.empty { margin-top: 20px; }
 .empty-card {
   background: var(--sw-bg-1);
   border: 1px dashed var(--sw-line-2);
@@ -171,102 +140,10 @@ const empty = computed(() => !isLoading.value && orderedLayers.value.length === 
   margin: 0 0 16px;
   line-height: 1.5;
 }
-.empty-card .sw-btn {
-  display: inline-flex;
-  text-decoration: none;
-}
-.empty-card a {
-  color: var(--sw-accent-2);
-  text-decoration: none;
-}
+.empty-card .sw-btn { display: inline-flex; text-decoration: none; }
+.empty-card a { color: var(--sw-accent-2); text-decoration: none; }
 
-/* Top per-layer KPI strip — 6 equal columns (or fewer if fewer than 6
- * layers are reporting). `--kpi-count` is set from the template so the
- * grid never goes wider than necessary. */
-.kpi-strip {
-  display: grid;
-  /* Auto-fit on a 180px floor — 6 layers fit comfortably above ~1140px,
-   * fall back to 3 / 2 / 1 columns at narrower viewports without an
-   * explicit media-query stack. */
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-/* Layout — 5fr grid:
- *  Row 1: featured-1 (2/5) · featured-2 (2/5) · alarms-rail (1/5)
- *  Row 2: compact-grid (4 tiles, 2x2 — 3/5 wide) ·   alarms-rail (continues, 2/5)
- *
- * The alarms rail widens from 1/5 in row 1 to 2/5 in row 2 — driven by
- * the compact-grid only occupying 3/5 of the row. This matches the
- * "top 2 = 2/5 each, other 4 = 3/5" allocation in the operator brief.
- */
-.overview-grid {
-  display: grid;
-  grid-template-columns: 2fr 2fr 1fr;
-  grid-template-rows: auto auto;
-  grid-template-areas:
-    'feat1 feat2 alarms'
-    'compact compact alarms';
-  gap: 14px;
-  align-items: start;
-}
-.featured-1 {
-  grid-area: feat1;
-  min-width: 0;
-}
-.featured-2 {
-  grid-area: feat2;
-  min-width: 0;
-}
-.alarms-rail {
-  grid-area: alarms;
-  min-width: 0;
-  align-self: stretch;
-}
-.compact-grid {
-  grid-area: compact;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  min-width: 0;
-}
-.overflow-note {
-  grid-column: 1 / -1;
-  font-size: 11px;
-  color: var(--sw-fg-3);
-  padding: 4px 8px;
-}
-.overflow-note a {
-  color: var(--sw-accent-2);
-  text-decoration: none;
-}
-
-/* Below ~1100px the rail crowds the featured cards — fall back to a
- * single column. The Alarms panel still has utility at narrow widths. */
-@media (max-width: 1100px) {
-  .overview-grid {
-    grid-template-columns: 1fr 1fr;
-    grid-template-areas:
-      'feat1 feat2'
-      'compact compact'
-      'alarms alarms';
-  }
-  .compact-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-@media (max-width: 720px) {
-  .overview-grid {
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      'feat1'
-      'feat2'
-      'compact'
-      'alarms';
-  }
-  .compact-grid {
-    grid-template-columns: 1fr;
-  }
-}
+/* KPI strip + Alarms rail layout lives in OverviewBody.vue — shared
+ * between the live Overview and the Preview tab on Admin · Overview
+ * setup so the two stay byte-identical. */
 </style>

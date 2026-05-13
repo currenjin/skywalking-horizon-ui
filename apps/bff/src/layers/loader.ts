@@ -32,10 +32,18 @@
  *     widget catalog)
  */
 
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, watch as fsWatch, writeFileSync } from 'node:fs';
 import { dirname, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { DashboardScope, DashboardWidget } from '@skywalking-horizon-ui/api-client';
+import type {
+  DashboardScope,
+  DashboardWidget,
+  EndpointDependencyConfig,
+  TopologyConfig,
+  TopologyMetricDef,
+} from '@skywalking-horizon-ui/api-client';
+
+export type { TopologyConfig, EndpointDependencyConfig, TopologyMetricDef };
 
 export interface LayerComponentFlags {
   service?: boolean;
@@ -45,7 +53,12 @@ export interface LayerComponentFlags {
   topology?: boolean;
   traces?: boolean;
   logs?: boolean;
-  profiling?: boolean;
+  /** Trace-driven thread profiling (original SkyWalking profile). */
+  traceProfiling?: boolean;
+  /** Kernel-level CPU / off-CPU profiling via eBPF agents. */
+  ebpfProfiling?: boolean;
+  /** JVM async-profiler integration. */
+  asyncProfiling?: boolean;
 }
 
 export interface LayerSlotsConfig {
@@ -65,22 +78,66 @@ export interface LayerMetricColumn {
   precision?: number;
 }
 
-export interface LayerMetricsConfig {
+/**
+ * Per-layer page header / service-list config — drives the per-layer
+ * Service page picker columns + default sort. Stored under
+ * `layer-header` in the JSON (with `metrics` accepted as a legacy
+ * alias).
+ */
+export interface LayerHeaderConfig {
   /** Default sort metric for the service list. */
   orderBy?: string;
   columns?: LayerMetricColumn[];
 }
 
+/** @deprecated alias kept for callers — same shape as LayerHeaderConfig. */
+export type LayerMetricsConfig = LayerHeaderConfig;
+
 /**
- * Overview-tile-only settings. Headline + trend metrics on the
- * per-layer compact tile in the Overview's top strip. Separated
- * from `LayerMetricsConfig` because these settings affect ONLY the
- * Overview page; the service list / per-layer pages don't read them.
+ * One Overview-tile metric. Self-contained: carries its own MQE +
+ * presentation hints (label / tip / unit / aggregation / scale /
+ * precision). The Overview tile no longer cross-references the
+ * per-layer header columns.
+ *
+ * `id` is auto-assigned by the loader (`ov_0`, `ov_1`, …) when the
+ * source JSON omits it, so the SPA + BFF always have a stable key to
+ * thread requests + results on.
+ */
+export interface OverviewMetric {
+  id?: string;
+  label: string;
+  mqe: string;
+  tip?: string;
+  unit?: string;
+  aggregation?: 'sum' | 'avg';
+  scale?: number;
+  precision?: number;
+}
+
+/**
+ * One Overview-tile group — a layer can have N groups, each rendered
+ * as its own tile in the Overview strip with the group's `title` in
+ * the header. `size: square` is the dense-fleet variant and should
+ * carry exactly 1 metric.
+ */
+export interface OverviewGroup {
+  title: string;
+  size: 'auto' | 'square';
+  metrics: OverviewMetric[];
+}
+
+/**
+ * Overview-tile config. `groups` is the canonical shape; legacy
+ * `metrics`/`throughput`/`spark` are migrated to a single auto-size
+ * group at load time.
  */
 export interface LayerOverviewConfig {
-  /** Metric key for the Overview tile's big headline value. */
+  groups?: OverviewGroup[];
+  /** @deprecated — wrapped into a single auto-size group on load. */
+  metrics?: OverviewMetric[];
+  /** @deprecated — migrated to the first group's first metric. */
   throughput?: string;
-  /** Metric key for the Overview tile's trend line. */
+  /** @deprecated — sparkline follows the headline metric. */
   spark?: string;
 }
 
@@ -99,7 +156,9 @@ export interface LayerDashboards {
   topology?: DashboardWidget[];
   trace?: DashboardWidget[];
   logs?: DashboardWidget[];
-  profiling?: DashboardWidget[];
+  traceProfiling?: DashboardWidget[];
+  ebpfProfiling?: DashboardWidget[];
+  asyncProfiling?: DashboardWidget[];
 }
 
 export interface LayerTemplate {
@@ -113,16 +172,87 @@ export interface LayerTemplate {
   documentLink?: string;
   slots: LayerSlotsConfig;
   components: LayerComponentFlags;
-  metrics: LayerMetricsConfig;
-  /** Overview-tile only — headline + trend metrics for the Overview's
-   *  per-layer compact tile. Optional; falls back to `metrics.orderBy`
-   *  for the headline when omitted. */
+  /** Per-layer page header / service-list config — drives the picker
+   *  columns on the per-layer Service page. */
+  header: LayerHeaderConfig;
+  /** @deprecated alias for `header` — populated by the loader so old
+   *  callers reading `template.metrics` keep working. */
+  metrics: LayerHeaderConfig;
+  /** Overview-tile config. Self-contained metric entries. */
   overview?: LayerOverviewConfig;
   /** Per-scope widget sets. `service` is the layer's primary landing. */
   dashboards?: LayerDashboards;
   /** Legacy single widget list — treated as `dashboards.service`. */
   widgets?: DashboardWidget[];
+  /** Service-map dashboard config — operator-editable node + edge MQE.
+   *  When absent the loader fills it from {@link BOOSTER_TOPOLOGY_DEFAULTS}. */
+  topology?: TopologyConfig;
+  /** API-dependency dashboard config — operator-editable node + edge MQE.
+   *  When absent the loader fills it from {@link BOOSTER_ENDPOINT_DEP_DEFAULTS}. */
+  endpointDependency?: EndpointDependencyConfig;
 }
+
+/**
+ * Booster-ui defaults for the service-map dashboard. Lifted from
+ * `general-service-relation.json:nodeExpressions / linkServerExpressions /
+ * linkClientExpressions` so a layer template without an explicit
+ * `topology` block still draws something meaningful. Operators can
+ * override any field by adding a `topology` block to the layer JSON.
+ *
+ * The ROLE bindings decide what each metric maps to on screen:
+ *   - `ring`   on `sla`        — circle stroke colour band
+ *   - `center` on `cpm`        — number printed inside the circle
+ *   - `secondary` on `respTime` — surfaced in detail panel
+ *
+ * Edge side: server has priority; the main-path computation picks the
+ * server cpm and falls back to client when null. The order in the
+ * `linkServerMetrics` / `linkClientMetrics` arrays drives the fallback
+ * priority for the renderer.
+ */
+export const BOOSTER_TOPOLOGY_DEFAULTS: TopologyConfig = {
+  nodeMetrics: [
+    { id: 'cpm', label: 'RPM', mqe: 'service_cpm', unit: 'rpm', role: 'center', aggregation: 'avg' },
+    { id: 'sla', label: 'SLA', mqe: 'service_sla/100', unit: '%', role: 'ring', aggregation: 'avg' },
+    { id: 'respTime', label: 'Latency', mqe: 'service_resp_time', unit: 'ms', role: 'secondary', aggregation: 'avg' },
+  ],
+  // Per-edge line metrics — mirror booster-ui's per-side family:
+  // RPM, avg response time, p95 percentile, and SLA%. The ids match
+  // across server and client so the right-sidebar pairing renders
+  // both sides aligned per row.
+  linkServerMetrics: [
+    { id: 'cpm', label: 'RPM', mqe: 'service_relation_server_cpm', unit: 'rpm', role: 'lineServer', aggregation: 'avg' },
+    { id: 'respTime', label: 'Avg response time', mqe: 'service_relation_server_resp_time', unit: 'ms', aggregation: 'avg' },
+    { id: 'p95', label: 'p95', mqe: "service_relation_server_percentile{p='95'}", unit: 'ms', aggregation: 'avg' },
+    { id: 'sla', label: 'SLA', mqe: 'service_relation_server_call_sla/100', unit: '%', aggregation: 'avg' },
+  ],
+  linkClientMetrics: [
+    { id: 'cpm', label: 'RPM', mqe: 'service_relation_client_cpm', unit: 'rpm', role: 'lineClient', aggregation: 'avg' },
+    { id: 'respTime', label: 'Avg response time', mqe: 'service_relation_client_resp_time', unit: 'ms', aggregation: 'avg' },
+    { id: 'p95', label: 'p95', mqe: "service_relation_client_percentile{p='95'}", unit: 'ms', aggregation: 'avg' },
+    { id: 'sla', label: 'SLA', mqe: 'service_relation_client_call_sla/100', unit: '%', aggregation: 'avg' },
+  ],
+};
+
+/**
+ * Booster-ui defaults for the API-dependency dashboard. Endpoint
+ * relations only expose a server-side MQE family, so there's no
+ * `linkClientMetrics`.
+ */
+export const BOOSTER_ENDPOINT_DEP_DEFAULTS: EndpointDependencyConfig = {
+  nodeMetrics: [
+    { id: 'cpm', label: 'RPM', mqe: 'endpoint_cpm', unit: 'rpm', role: 'center', aggregation: 'avg' },
+    { id: 'sla', label: 'SLA', mqe: 'endpoint_sla/100', unit: '%', role: 'ring', aggregation: 'avg' },
+    { id: 'respTime', label: 'Latency', mqe: 'endpoint_resp_time', unit: 'ms', role: 'secondary', aggregation: 'avg' },
+  ],
+  // Server-side only (OAP has no `endpoint_relation_client_*` family).
+  // Same four-metric set as the service map for visual consistency.
+  linkMetrics: [
+    { id: 'cpm', label: 'RPM', mqe: 'endpoint_relation_cpm', unit: 'rpm', role: 'lineServer', aggregation: 'avg' },
+    { id: 'respTime', label: 'Avg response time', mqe: 'endpoint_relation_resp_time', unit: 'ms', aggregation: 'avg' },
+    { id: 'p95', label: 'p95', mqe: "endpoint_relation_percentile{p='95'}", unit: 'ms', aggregation: 'avg' },
+    { id: 'sla', label: 'SLA', mqe: 'endpoint_relation_sla/100', unit: '%', aggregation: 'avg' },
+  ],
+};
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_DIR = join(__dirname, 'config');
@@ -161,12 +291,46 @@ function load(): Map<string, LayerTemplate> {
     if (parsed.widgets && (!parsed.dashboards || !parsed.dashboards.service)) {
       parsed.dashboards = { ...parsed.dashboards, service: parsed.widgets };
     }
-    // Migrate legacy `metrics.throughput` + `metrics.spark` → top-level
-    // `overview` block. Overview-page settings used to live alongside
-    // the service-list metric config; they're now split since they
-    // affect different pages.
+    // Profiling split: the old shape had a single `profiling` component
+    // / dashboards bucket; we now split into Trace / eBPF / Async
+    // profiling. Older JSONs are migrated by promoting the legacy
+    // single bucket to `traceProfiling` — operators can fill the
+    // remaining two slots through the admin UI on first edit.
+    const legacyComponents = parsed.components as
+      | (LayerComponentFlags & { profiling?: boolean })
+      | undefined;
+    if (legacyComponents && legacyComponents.profiling !== undefined) {
+      if (legacyComponents.traceProfiling === undefined) {
+        legacyComponents.traceProfiling = legacyComponents.profiling;
+      }
+      delete legacyComponents.profiling;
+    }
+    const legacyDashboards = parsed.dashboards as
+      | (LayerDashboards & { profiling?: DashboardWidget[] })
+      | undefined;
+    if (legacyDashboards && legacyDashboards.profiling) {
+      if (!legacyDashboards.traceProfiling) {
+        legacyDashboards.traceProfiling = legacyDashboards.profiling;
+      }
+      delete legacyDashboards.profiling;
+    }
+    // Header block: accept the new `layer-header` JSON key (preferred)
+    // and the legacy `metrics` alias. Internal callers read
+    // `template.header`; we also populate `template.metrics` so older
+    // code paths keep working without churn.
+    const headerSrc = (parsed as unknown as Record<string, unknown>)['layer-header'] as
+      | LayerHeaderConfig
+      | undefined;
+    if (headerSrc && !parsed.header) parsed.header = headerSrc;
+    if (!parsed.header && parsed.metrics) parsed.header = parsed.metrics;
+    if (!parsed.header) parsed.header = { columns: [] };
+    parsed.metrics = parsed.header;
+
+    // Legacy: `metrics.throughput` + `metrics.spark` used to sit
+    // inside the header block. Promote to top-level `overview` so the
+    // tile rendering doesn't have to know about either spelling.
     const legacyMetrics = parsed.metrics as
-      | (LayerMetricsConfig & { throughput?: string; spark?: string })
+      | (LayerHeaderConfig & { throughput?: string; spark?: string })
       | undefined;
     if (legacyMetrics && (legacyMetrics.throughput || legacyMetrics.spark)) {
       const ov: LayerOverviewConfig = { ...(parsed.overview ?? {}) };
@@ -175,6 +339,91 @@ function load(): Map<string, LayerTemplate> {
       parsed.overview = ov;
       delete legacyMetrics.throughput;
       delete legacyMetrics.spark;
+    }
+
+    // Overview tile schema: self-contained `OverviewMetric[]`. Support
+    // three input shapes and normalize to the new one:
+    //   1. `metrics: OverviewMetric[]`   ← new shape, pass through.
+    //   2. `metrics: string[]`           ← previous shape (key refs
+    //      into the header columns); resolve each ref to a full entry.
+    //   3. `throughput` / `spark` strings ← oldest shape; resolve same
+    //      way the column-ref path does.
+    if (parsed.overview) {
+      const ov = parsed.overview as LayerOverviewConfig & {
+        throughput?: string;
+        spark?: string;
+        metrics?: unknown;
+      };
+      const columns = parsed.header?.columns ?? [];
+      const findCol = (key: string): LayerMetricColumn | undefined =>
+        columns.find((c) => c.metric === key);
+      const fromRef = (key: string, fallbackLabel?: string): OverviewMetric => {
+        const col = findCol(key);
+        // mqe falls back to the bare metric key — the BFF landing
+        // route resolves unknown keys through the metric catalog, so
+        // legacy short keys like `cpm` keep working without an
+        // explicit expression in the JSON.
+        return {
+          id: key,
+          label: col?.label ?? fallbackLabel ?? key,
+          mqe: col?.mqe ?? key,
+          ...(col?.unit ? { unit: col.unit } : {}),
+          ...(col?.aggregation ? { aggregation: col.aggregation } : {}),
+          ...(col?.scale !== undefined ? { scale: col.scale } : {}),
+          ...(col?.precision !== undefined ? { precision: col.precision } : {}),
+        };
+      };
+      let resolved: OverviewMetric[] = [];
+      if (Array.isArray(ov.metrics)) {
+        for (const m of ov.metrics as Array<OverviewMetric | string>) {
+          if (typeof m === 'string') {
+            resolved.push(fromRef(m));
+          } else if (m && typeof m === 'object' && 'mqe' in m) {
+            resolved.push(m);
+          } else if (m && typeof m === 'object' && 'label' in m) {
+            // Object without an explicit mqe — treat the label as a
+            // metric-key ref so older JSONs writing { label: "cpm" }
+            // keep working.
+            resolved.push(fromRef((m as { label: string }).label, (m as { label: string }).label));
+          }
+        }
+      }
+      if (resolved.length === 0) {
+        if (ov.throughput) resolved.push(fromRef(ov.throughput));
+        if (ov.spark && ov.spark !== ov.throughput) resolved.push(fromRef(ov.spark));
+      }
+      // Assign auto-ids to any unkeyed entry. The id is what the SPA
+      // threads through the landing query as the synthetic column key.
+      resolved = resolved.map((m, i) => ({ id: m.id ?? `ov_${i}`, ...m }));
+
+      // Groups migration: if the JSON didn't supply `groups`, wrap the
+      // resolved metric list into a single auto-size group so older
+      // configs still light up. JSON authors writing `groups` directly
+      // win.
+      const ovGroups = (ov as { groups?: OverviewGroup[] }).groups;
+      if (!ovGroups || ovGroups.length === 0) {
+        ov.groups = resolved.length > 0
+          ? [{ title: '', size: 'auto', metrics: resolved }]
+          : [];
+      } else {
+        // For author-supplied groups, also assign ov_* ids to any
+        // unkeyed entries so the SPA has a stable synthetic column key
+        // to query through.
+        let counter = 0;
+        ov.groups = ovGroups.map((g) => ({
+          title: g.title ?? '',
+          size: g.size === 'square' ? 'square' : 'auto',
+          metrics: (g.metrics ?? []).map((m) => ({
+            id: m.id ?? `ov_${counter++}`,
+            ...m,
+          })),
+        }));
+      }
+      // Keep the legacy `metrics` array in sync with the flattened
+      // groups so any caller still reading the old field keeps working.
+      ov.metrics = (ov.groups ?? []).flatMap((g) => g.metrics);
+      delete ov.throughput;
+      delete ov.spark;
     }
     out.set(parsed.key.toUpperCase(), parsed);
   }
@@ -189,6 +438,22 @@ export function widgetsForScope(
   const d = template.dashboards;
   if (!d) return template.widgets ?? [];
   return d[scope] ?? d.service ?? template.widgets ?? [];
+}
+
+/** Resolve the topology config — operator override if present, else
+ *  booster-ui defaults. Operators add a `topology` block to the layer
+ *  JSON to swap MQE expressions, units, or visual role bindings. */
+export function topologyConfigFor(template: LayerTemplate | null): TopologyConfig {
+  if (template?.topology) return template.topology;
+  return BOOSTER_TOPOLOGY_DEFAULTS;
+}
+
+/** Resolve the endpoint-dependency config — same fallback rule. */
+export function endpointDependencyConfigFor(
+  template: LayerTemplate | null,
+): EndpointDependencyConfig {
+  if (template?.endpointDependency) return template.endpointDependency;
+  return BOOSTER_ENDPOINT_DEP_DEFAULTS;
 }
 
 /**
@@ -224,7 +489,35 @@ export function allLayerTemplates(): LayerTemplate[] {
   return Array.from(cache.values());
 }
 
-/** Force a reload from disk — used by a future admin save endpoint. */
+/** Force a reload from disk — used by the admin save endpoint and by
+ *  the file-watcher below when JSON config files change on disk. */
 export function reloadLayerTemplates(): void {
   cache = null;
+}
+
+/**
+ * Hot-reload bridge: watch the `config/` directory and invalidate the
+ * cache whenever a JSON file changes. `tsx watch` only restarts on
+ * `.ts` edits, so without this, JSON edits would be invisible until
+ * the BFF was killed by hand. Debounced (50 ms) to coalesce the
+ * editor-emitted rename+rename+change burst into a single reload.
+ *
+ * Errors are swallowed — a missing config dir is an existing
+ * problem the loader surfaces elsewhere; failing to watch shouldn't
+ * crash the BFF.
+ */
+let watchTimer: NodeJS.Timeout | null = null;
+try {
+  fsWatch(CONFIG_DIR, (_event, filename) => {
+    if (!filename || !filename.endsWith('.json')) return;
+    if (watchTimer) clearTimeout(watchTimer);
+    watchTimer = setTimeout(() => {
+      cache = null;
+      watchTimer = null;
+    }, 50);
+  });
+} catch {
+  // Best-effort. If fs.watch isn't supported on this filesystem
+  // (e.g. some network FS), the operator can still reload through
+  // the admin save endpoint.
 }

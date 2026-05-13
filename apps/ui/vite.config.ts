@@ -28,9 +28,11 @@ export default defineConfig({
     },
   },
   server: {
-    // 9090: horizon-side. 8080 is reserved for the legacy booster-ui that
-    // operators may run side-by-side during migration.
-    port: 9090,
+    // 9091: horizon-side. 9090 is commonly claimed by ClashX / proxy
+    // tools that bind to all addresses; 8080 is reserved for the
+    // legacy booster-ui that operators may run side-by-side during
+    // migration.
+    port: 9091,
     strictPort: true,
     proxy: {
       // proxy to the BFF (`apps/bff`) during dev

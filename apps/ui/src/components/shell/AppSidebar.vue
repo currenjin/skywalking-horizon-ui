@@ -46,7 +46,7 @@ function isSingleFeatureLayer(L: SidebarLayer): boolean {
   if (L.slots.instances || L.slots.endpoints) return false;
   if (hasTopology(L)) return false;
   const c = L.caps;
-  if (c.traces || c.logs || c.profiling || c.events) return false;
+  if (c.traces || c.logs || c.traceProfiling || c.ebpfProfiling || c.asyncProfiling || c.events) return false;
   if (c.endpointDependency || c.serviceMap || c.instanceTopology || c.processTopology) return false;
   return true;
 }
@@ -272,12 +272,28 @@ const sections: NavSection[] = [
             <Icon name="log" /><span>Logs</span>
           </RouterLink>
           <RouterLink
-            v-if="L.caps.profiling"
-            :to="`/layer/${L.key}/profiling`"
+            v-if="L.caps.traceProfiling"
+            :to="`/layer/${L.key}/trace-profiling`"
             class="sw-nav-item"
-            :class="{ 'is-active': isActive(`/layer/${L.key}/profiling`) }"
+            :class="{ 'is-active': isActive(`/layer/${L.key}/trace-profiling`) }"
           >
-            <Icon name="flame" /><span>Profiling</span>
+            <Icon name="flame" /><span>Trace Profiling</span>
+          </RouterLink>
+          <RouterLink
+            v-if="L.caps.ebpfProfiling"
+            :to="`/layer/${L.key}/ebpf-profiling`"
+            class="sw-nav-item"
+            :class="{ 'is-active': isActive(`/layer/${L.key}/ebpf-profiling`) }"
+          >
+            <Icon name="flame" /><span>eBPF Profiling</span>
+          </RouterLink>
+          <RouterLink
+            v-if="L.caps.asyncProfiling"
+            :to="`/layer/${L.key}/async-profiling`"
+            class="sw-nav-item"
+            :class="{ 'is-active': isActive(`/layer/${L.key}/async-profiling`) }"
+          >
+            <Icon name="flame" /><span>Async Profiling</span>
           </RouterLink>
         </div>
       </template>

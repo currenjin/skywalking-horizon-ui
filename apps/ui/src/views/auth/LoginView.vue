@@ -34,7 +34,12 @@ async function submit(): Promise<void> {
   try {
     const ok = await auth.login(username.value, password.value);
     if (ok) {
-      const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/';
+      // Honor an explicit `?redirect=` (session-expiry bounce-back). For
+      // a fresh login we want to always land on the Overview — never the
+      // bare login URL or an empty path. The /login redirect itself is
+      // also skipped so a stale tab doesn't loop the user back.
+      const raw = typeof route.query.redirect === 'string' ? route.query.redirect : '';
+      const redirect = raw && raw !== '/login' ? raw : '/';
       await router.push(redirect);
     }
   } finally {

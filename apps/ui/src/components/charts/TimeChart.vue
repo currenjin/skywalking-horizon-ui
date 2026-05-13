@@ -224,10 +224,24 @@ function buildOption(): echarts.EChartsCoreOption {
   };
 }
 
+/** Track previous series fingerprint so we only do a full-replace when
+ *  the series structure changes (count / labels / axes). Polling
+ *  refreshes keep the same fingerprint and just shift values, so
+ *  ECharts can animate point-to-point instead of re-rendering from
+ *  scratch — visually the line slides left and the newest dot drops
+ *  in on the right. */
+function seriesFingerprint(series: Series[]): string {
+  return series
+    .map((s) => `${s.label}|${s.yAxisIndex ?? 0}|${s.unit ?? ''}|${s.data.length}`)
+    .join('::');
+}
+let prevFingerprint = '';
+
 onMounted(() => {
   if (!container.value) return;
   chart = echarts.init(container.value, null, { renderer: 'canvas' });
   chart.setOption(buildOption());
+  prevFingerprint = seriesFingerprint(props.series);
   const ro = new ResizeObserver(() => chart?.resize());
   ro.observe(container.value);
   onBeforeUnmount(() => {
@@ -239,7 +253,28 @@ onMounted(() => {
 
 watch(
   () => props.series,
-  () => chart?.setOption(buildOption(), { replaceMerge: ['series'] }),
+  (next) => {
+    if (!chart) return;
+    const fp = seriesFingerprint(next);
+    if (fp === prevFingerprint) {
+      // Same structure — just update data values. ECharts animates
+      // point-by-point so a polling refresh reads as a smooth slide,
+      // not a full re-render.
+      chart.setOption({
+        series: next.map((s, i) => ({
+          name: s.label,
+          data: s.data.map((v) => (v === null ? '-' : v)),
+          // Index implicit by position; setOption merges by index.
+          ...(i === -1 ? {} : {}),
+        })),
+      });
+    } else {
+      // Structure changed (count / axis / label flipped) — full
+      // replace so stale series elements don't leak into the chart.
+      chart.setOption(buildOption(), { replaceMerge: ['series'] });
+      prevFingerprint = fp;
+    }
+  },
   { deep: true },
 );
 watch(
@@ -248,7 +283,10 @@ watch(
 );
 watch(
   () => props.accent,
-  () => chart?.setOption(buildOption(), { replaceMerge: ['series'] }),
+  () => {
+    chart?.setOption(buildOption(), { replaceMerge: ['series'] });
+    prevFingerprint = seriesFingerprint(props.series);
+  },
 );
 </script>
 

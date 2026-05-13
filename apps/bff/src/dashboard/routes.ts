@@ -62,11 +62,16 @@ const widgetSchema = z.object({
   id: z.string().min(1),
   title: z.string(),
   tip: z.string().optional(),
-  type: z.enum(['card', 'line', 'top']),
-  expressions: z.array(z.string().min(1)).min(1).max(8),
-  expressionLabels: z.array(z.string()).max(8).optional(),
-  expressionUnits: z.array(z.string()).max(8).optional(),
-  expressionAxes: z.array(z.number().int().min(0).max(1)).max(8).optional(),
+  type: z.enum(['card', 'line', 'top', 'record']),
+  // Bumped from 8 to 16: JVM Memory Detail carries 11 pool metrics
+  // (code cache + young/old/survivor/permgen/metaspace + z-heap +
+  // compressed class space + 3 segmented codeheaps), and a few of the
+  // language families approach the same range. 16 gives headroom for
+  // future relabeled bundles without blowing the cap.
+  expressions: z.array(z.string().min(1)).min(1).max(16),
+  expressionLabels: z.array(z.string()).max(16).optional(),
+  expressionUnits: z.array(z.string()).max(16).optional(),
+  expressionAxes: z.array(z.number().int().min(0).max(1)).max(16).optional(),
   unit: z.string().optional(),
   span: z.number().int().min(1).max(12).optional(),
   rowSpan: z.number().int().min(1).max(64).optional(),
@@ -86,10 +91,22 @@ const scopeSchema = z.enum([
   'topology',
   'trace',
   'logs',
-  'profiling',
+  'traceProfiling',
+  'ebpfProfiling',
+  'asyncProfiling',
 ]);
 const bodySchema = z.object({
   service: z.string().optional(),
+  /** Selected instance name. Honored only when `scope === 'instance'`
+   *  (or any instance-derived scope) — the BFF flips the MQE entity to
+   *  `{ scope: ServiceInstance, serviceName, serviceInstanceName }` so
+   *  every widget on the Instance page evaluates against the chosen
+   *  pair instead of the parent service. */
+  serviceInstance: z.string().optional(),
+  /** Selected endpoint name, analogous to `serviceInstance` but for
+   *  the Endpoint page. Switches the entity to
+   *  `{ scope: Endpoint, serviceName, endpointName }`. */
+  endpoint: z.string().optional(),
   widgets: z.array(widgetSchema).max(40).optional(),
   scope: scopeSchema.optional(),
 });
@@ -155,7 +172,14 @@ function buildFragment(
   serviceName: string,
   normal: boolean,
   w: Window,
-  opts: { layerScope?: boolean } = {},
+  opts: {
+    layerScope?: boolean;
+    /** When set, the MQE entity flips to ServiceInstance scope and
+     *  carries the selected instance name. Drives the Instance page. */
+    serviceInstanceName?: string | null;
+    /** When set, flips to Endpoint scope with this endpoint name. */
+    endpointName?: string | null;
+  } = {},
 ): string {
   // We fetch metric.labels (for multi-series Line widgets — relabels()
   // returns one labeled result per percentile) and value.id /
@@ -165,9 +189,22 @@ function buildFragment(
   // layerScope=true skips the serviceName filter so the MQE runs
   // across the whole layer — used for cross-service rollups like the
   // "Top 20 endpoints" widget on the per-layer Service page.
-  const entity = opts.layerScope
-    ? '{ scope: All }'
-    : `{ scope: Service, serviceName: ${JSON.stringify(serviceName)}, normal: ${normal ? 'true' : 'false'} }`;
+  let entity: string;
+  if (opts.layerScope) {
+    entity = '{ scope: All }';
+  } else if (opts.serviceInstanceName) {
+    entity =
+      `{ scope: ServiceInstance, serviceName: ${JSON.stringify(serviceName)},` +
+      ` serviceInstanceName: ${JSON.stringify(opts.serviceInstanceName)},` +
+      ` normal: ${normal ? 'true' : 'false'} }`;
+  } else if (opts.endpointName) {
+    entity =
+      `{ scope: Endpoint, serviceName: ${JSON.stringify(serviceName)},` +
+      ` endpointName: ${JSON.stringify(opts.endpointName)},` +
+      ` normal: ${normal ? 'true' : 'false'} }`;
+  } else {
+    entity = `{ scope: Service, serviceName: ${JSON.stringify(serviceName)}, normal: ${normal ? 'true' : 'false'} }`;
+  }
   return (
     `${alias}: execExpression(\n` +
     `      expression: ${JSON.stringify(expression)},\n` +
@@ -348,6 +385,16 @@ export function registerDashboardRoute(app: FastifyInstance, deps: DashboardRout
       // Step 2 — batch all widget × expression queries into one GraphQL trip.
       const fragments: string[] = [];
       const aliasMap = new Map<string, { wIdx: number; eIdx: number }>();
+      // Per-widget scope plumbing: an instance-scoped page passes
+      // `serviceInstance` in the body; an endpoint page passes
+      // `endpoint`. Widgets that opt into `layerScope` always win over
+      // both (they ignore the selected entity by design — they're
+      // layer-wide rollups). When neither override applies, we keep
+      // the legacy Service-scope behavior.
+      const selectedInstance = parsed.data.serviceInstance ?? null;
+      const selectedEndpoint = parsed.data.endpoint ?? null;
+      const scopeHonorsInstance = scope === 'instance';
+      const scopeHonorsEndpoint = scope === 'endpoint';
       widgets.forEach((widget, wIdx) => {
         widget.expressions.forEach((expr, eIdx) => {
           const alias = `w${wIdx}_e${eIdx}`;
@@ -355,6 +402,10 @@ export function registerDashboardRoute(app: FastifyInstance, deps: DashboardRout
           fragments.push(
             buildFragment(alias, expr, serviceName, normal, window, {
               layerScope: widget.layerScope === true,
+              serviceInstanceName:
+                widget.layerScope !== true && scopeHonorsInstance ? selectedInstance : null,
+              endpointName:
+                widget.layerScope !== true && scopeHonorsEndpoint ? selectedEndpoint : null,
             }),
           );
         });
@@ -434,6 +485,21 @@ export function registerDashboardRoute(app: FastifyInstance, deps: DashboardRout
           };
         }
 
+        if (widget.type === 'record') {
+          // RECORD-typed MQE (slow SQL / slow statements) — the OAP
+          // response is owner-keyed like topList but each entry also
+          // carries a trace/segment id we surface for the drill-in.
+          // We reuse parseTopList for the name/value pair; the
+          // runtime record renderer is a separate phase and will
+          // promote v.id / v.refId fields once it lands.
+          const first = parseTopList(data[`w${wIdx}_e0`]);
+          if (!first) return { id: widget.id, error: 'no data' };
+          return {
+            id: widget.id,
+            records: first.map((r) => ({ name: r.name, value: r.value })),
+          };
+        }
+
         if (widget.type === 'card') {
           const first = widget.expressions.map((_, eIdx) =>
             parseSeries(data[`w${wIdx}_e${eIdx}`]),
@@ -481,7 +547,7 @@ export function registerDashboardRoute(app: FastifyInstance, deps: DashboardRout
 
   // GET version returns the default widget config without running queries —
   // useful for the SPA to know what to render before invoking POST.
-  // Accepts ?scope=service|instance|endpoint|trace|profiling.
+  // Accepts ?scope=service|instance|endpoint|dependency|topology|trace|logs|traceProfiling|ebpfProfiling|asyncProfiling.
   app.get(
     '/api/layer/:key/dashboard/config',
     { preHandler: auth },
@@ -533,7 +599,9 @@ export function registerDashboardRoute(app: FastifyInstance, deps: DashboardRout
         topology: z.boolean().optional(),
         traces: z.boolean().optional(),
         logs: z.boolean().optional(),
-        profiling: z.boolean().optional(),
+        traceProfiling: z.boolean().optional(),
+        ebpfProfiling: z.boolean().optional(),
+        asyncProfiling: z.boolean().optional(),
       })
       .strict(),
     metrics: z
@@ -571,7 +639,9 @@ export function registerDashboardRoute(app: FastifyInstance, deps: DashboardRout
         topology: z.array(widgetSchema).max(40).optional(),
         trace: z.array(widgetSchema).max(40).optional(),
         logs: z.array(widgetSchema).max(40).optional(),
-        profiling: z.array(widgetSchema).max(40).optional(),
+        traceProfiling: z.array(widgetSchema).max(40).optional(),
+        ebpfProfiling: z.array(widgetSchema).max(40).optional(),
+        asyncProfiling: z.array(widgetSchema).max(40).optional(),
       })
       .strict()
       .optional(),

@@ -23,6 +23,47 @@
  * `{name, title, tips}` per expression, which we collapse to one
  * `MetricMeta` per logical metric. Phase 7's admin UI lets operators
  * extend/override this catalog per deployment.
+ *
+ * ---------------------------------------------------------------------
+ * Terminology standard
+ * ---------------------------------------------------------------------
+ * Each entry has a short-key `key` (used in URLs / persisted config /
+ * setup JSON) and a human display `label`. The conventions below are
+ * authoritative — please don't introduce parallel spellings.
+ *
+ *   key          display label    notes
+ *   ----         -------------    ----------------------------------
+ *   cpm          RPM              The internal short key stays `cpm`
+ *                                 (matches OAP's `service_cpm`), but
+ *                                 the display label is "RPM" /
+ *                                 "Requests per minute" — operators
+ *                                 read web-throughput terms more
+ *                                 naturally than "Calls per minute".
+ *                                 Never display the raw "cpm".
+ *   resp         Avg RT           "Average response time" in ms. Use
+ *                                 "Avg RT" on tight chrome, "Average
+ *                                 Response Time" in tooltips.
+ *   p50/p75/p95/p99   P50/P75/P95/P99   Uppercase. Latency percentiles.
+ *   sla          SLA              "Success Rate" is acceptable in body
+ *                                 copy, but the short label stays SLA
+ *                                 to match OAP's `service_sla` metric.
+ *                                 NEVER lower-case as "sla".
+ *   apdex        Apdex            Title-case, single word. Booster
+ *                                 uses "Apdex Score"; "Apdex" alone
+ *                                 fits our denser tile.
+ *   err          Error Rate       "Error Rate" with a space. Lower is
+ *                                 better. Avoid "error pct".
+ *
+ *   mq.msg-rate         Msg/s
+ *   mq.consumer-lag     Lag
+ *   mq.consume-latency  Consume
+ *
+ *   db.qps              QPS
+ *   db.slow-queries     Slow
+ *
+ * Short labels appear on KPI tiles where pixels are scarce; long
+ * labels appear in setup pickers / tooltips. The full sentence-form
+ * lives in `longLabel`.
  */
 
 export interface MetricMeta {
@@ -57,14 +98,19 @@ export type LayerCategory =
 export const METRICS: Record<string, MetricMeta> = {
   cpm: {
     key: 'cpm',
-    label: 'cpm',
-    longLabel: 'Calls per minute',
+    // Displayed as "RPM" (requests per minute) even though the OAP
+    // metric key is `service_cpm`. RPM reads more naturally for
+    // operators familiar with web-throughput terminology. The short
+    // key stays `cpm` to match OAP / booster-ui everywhere data
+    // flows through.
+    label: 'RPM',
+    longLabel: 'Requests per minute',
     tip: 'Throughput — average number of requests served per minute over the time window.',
     category: 'throughput',
   },
   resp: {
     key: 'resp',
-    label: 'avg resp',
+    label: 'Avg RT',
     longLabel: 'Average response time',
     unit: 'ms',
     tip: 'Mean latency across all calls in the time window.',
@@ -72,7 +118,7 @@ export const METRICS: Record<string, MetricMeta> = {
   },
   p50: {
     key: 'p50',
-    label: 'p50',
+    label: 'P50',
     longLabel: '50th percentile latency',
     unit: 'ms',
     tip: 'Median response time — half of requests complete within this latency.',
@@ -80,7 +126,7 @@ export const METRICS: Record<string, MetricMeta> = {
   },
   p75: {
     key: 'p75',
-    label: 'p75',
+    label: 'P75',
     longLabel: '75th percentile latency',
     unit: 'ms',
     tip: '75% of requests complete within this latency.',
@@ -88,7 +134,7 @@ export const METRICS: Record<string, MetricMeta> = {
   },
   p95: {
     key: 'p95',
-    label: 'p95',
+    label: 'P95',
     longLabel: '95th percentile latency',
     unit: 'ms',
     tip: '95% of requests complete within this latency — useful for the long tail.',
@@ -96,7 +142,7 @@ export const METRICS: Record<string, MetricMeta> = {
   },
   p99: {
     key: 'p99',
-    label: 'p99',
+    label: 'P99',
     longLabel: '99th percentile latency',
     unit: 'ms',
     tip: '99% of requests complete within this latency — the slow tail experienced by 1% of users.',
@@ -105,21 +151,21 @@ export const METRICS: Record<string, MetricMeta> = {
   sla: {
     key: 'sla',
     label: 'SLA',
-    longLabel: 'Service Level Agreement',
+    longLabel: 'Service Level Agreement (success rate)',
     unit: '%',
     tip: 'Percentage of successful requests — `(successful / total) * 100`. Higher is better.',
     category: 'reliability',
   },
   apdex: {
     key: 'apdex',
-    label: 'apdex',
+    label: 'Apdex',
     longLabel: 'Application Performance Index',
     tip: 'User-satisfaction score on a 0–1 scale. Computed from response-time thresholds.',
     category: 'reliability',
   },
   err: {
     key: 'err',
-    label: 'err',
+    label: 'Error Rate',
     longLabel: 'Error rate',
     unit: '%',
     tip: 'Percentage of failed requests. Lower is better.',
@@ -132,21 +178,21 @@ export const METRICS: Record<string, MetricMeta> = {
   // expression is resolved per-deployment by the BFF in Stage 2.6.
   'mq.msg-rate': {
     key: 'mq.msg-rate',
-    label: 'msg/s',
+    label: 'Msg/s',
     longLabel: 'Messages per second',
     tip: 'Producer or consumer message throughput across the cluster.',
     category: 'throughput',
   },
   'mq.consumer-lag': {
     key: 'mq.consumer-lag',
-    label: 'lag',
+    label: 'Lag',
     longLabel: 'Consumer lag',
     tip: 'Number of messages a consumer is behind the latest offset. Lower is better.',
     category: 'reliability',
   },
   'mq.consume-latency': {
     key: 'mq.consume-latency',
-    label: 'consume',
+    label: 'Consume',
     longLabel: 'Consume latency',
     unit: 'ms',
     tip: 'Time from publish to consumer acknowledgment.',
@@ -156,21 +202,21 @@ export const METRICS: Record<string, MetricMeta> = {
   // --- DB layers (mysql / postgresql / mongodb / elasticsearch / redis / clickhouse / virtual_database)
   'db.qps': {
     key: 'db.qps',
-    label: 'qps',
+    label: 'QPS',
     longLabel: 'Queries per second',
     tip: 'Average query throughput over the time window.',
     category: 'throughput',
   },
   'db.slow-queries': {
     key: 'db.slow-queries',
-    label: 'slow',
+    label: 'Slow',
     longLabel: 'Slow query count',
     tip: 'Number of queries exceeding the slow-query threshold.',
     category: 'reliability',
   },
   'db.conn': {
     key: 'db.conn',
-    label: 'conns',
+    label: 'Conns',
     longLabel: 'Active connections',
     tip: 'Open client connections to the database.',
     category: 'resource',
@@ -179,7 +225,7 @@ export const METRICS: Record<string, MetricMeta> = {
   // --- Cache (redis / virtual_cache)
   'cache.hit-rate': {
     key: 'cache.hit-rate',
-    label: 'hit',
+    label: 'Hit',
     longLabel: 'Cache hit rate',
     unit: '%',
     tip: 'Percentage of lookups served from cache.',

@@ -45,6 +45,13 @@ export function useLayerDashboardConfig(layerKey: Ref<string>, scope?: Ref<strin
   };
 }
 
+export interface DashboardEntityRefs {
+  /** Selected instance name — only consumed when scope === 'instance'. */
+  instance?: Ref<string | null>;
+  /** Selected endpoint name — only consumed when scope === 'endpoint'. */
+  endpoint?: Ref<string | null>;
+}
+
 export function useLayerDashboard(
   layerKey: Ref<string>,
   service: Ref<string | null>,
@@ -52,7 +59,22 @@ export function useLayerDashboard(
   /** Optional `?mockTop=N` passthrough — when set, every TopList in
    *  the response is padded to N synthetic rows for UI sizing tests. */
   mockTop?: Ref<number>,
+  /** Optional drill refs (instance / endpoint). Each is forwarded to
+   *  the BFF only when the corresponding scope is active; passing a
+   *  ref keeps the query key cache-aware so switching instances on
+   *  the same service re-fetches. */
+  entityRefs: DashboardEntityRefs = {},
 ) {
+  // Auto-refresh is metrics-only. Trace / log / profiling pages are
+  // explore-style (operator-driven queries, log tails, etc.) and would
+  // surprise the user if the page swapped state every minute. Service /
+  // instance / endpoint are the "live metrics" scopes that benefit
+  // from polling.
+  const METRIC_SCOPES = new Set(['service', 'instance', 'endpoint']);
+  const refetchIntervalRef = computed(() => {
+    const s = scope?.value ?? 'service';
+    return METRIC_SCOPES.has(s) ? 30_000 : false;
+  });
   const q = useQuery({
     queryKey: [
       'dashboard',
@@ -60,6 +82,8 @@ export function useLayerDashboard(
       service,
       scope ?? computed(() => 'service'),
       mockTop ?? computed(() => 0),
+      entityRefs.instance ?? computed(() => null),
+      entityRefs.endpoint ?? computed(() => null),
     ],
     queryFn: () =>
       bffClient.dashboard(
@@ -67,13 +91,15 @@ export function useLayerDashboard(
         {
           ...(service.value ? { service: service.value } : {}),
           ...(scope?.value ? { scope: scope.value } : {}),
+          ...(entityRefs.instance?.value ? { serviceInstance: entityRefs.instance.value } : {}),
+          ...(entityRefs.endpoint?.value ? { endpoint: entityRefs.endpoint.value } : {}),
         },
         mockTop?.value ? { mockTop: mockTop.value } : {},
       ),
     enabled: computed(() => layerKey.value.length > 0),
-    staleTime: 45_000,
-    refetchInterval: 60_000,
-    refetchOnWindowFocus: true,
+    staleTime: 25_000,
+    refetchInterval: refetchIntervalRef,
+    refetchOnWindowFocus: computed(() => METRIC_SCOPES.has(scope?.value ?? 'service')),
     retry: 1,
   });
   return {

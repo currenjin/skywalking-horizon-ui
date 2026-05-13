@@ -19,12 +19,14 @@ import type {
   DashboardConfig,
   DashboardResponse,
   DashboardWidget,
+  EndpointDependencyResponse,
   LandingConfig,
   LandingResponse,
   MenuResponse,
   OapInfo,
   SetupResponse,
   SetupSavePayload,
+  TopologyResponse,
 } from '@skywalking-horizon-ui/api-client';
 
 export type {
@@ -44,6 +46,15 @@ export type {
   DashboardResponse,
   DashboardWidget,
   DashboardWidgetResult,
+  TopologyMetricDef,
+  TopologyConfig,
+  EndpointDependencyConfig,
+  TopologyNode,
+  TopologyCall,
+  TopologyResponse,
+  EndpointDependencyNode,
+  EndpointDependencyCall,
+  EndpointDependencyResponse,
 } from '@skywalking-horizon-ui/api-client';
 
 
@@ -200,7 +211,17 @@ export class BffClient {
   }
   dashboard(
     layerKey: string,
-    body: { service?: string; widgets?: DashboardWidget[]; scope?: string } = {},
+    body: {
+      service?: string;
+      /** Active instance name. When set with `scope === 'instance'`,
+       *  the BFF flips each widget's MQE entity to ServiceInstance. */
+      serviceInstance?: string;
+      /** Active endpoint name. When set with `scope === 'endpoint'`,
+       *  the BFF flips each widget's MQE entity to Endpoint. */
+      endpoint?: string;
+      widgets?: DashboardWidget[];
+      scope?: string;
+    } = {},
     /** Dev-mode mock: pad every TopList result to N entries with
      *  synthetic rows so operators can verify widget sizing without
      *  waiting for live data. Forwarded as `?mockTop=N`. */
@@ -213,6 +234,93 @@ export class BffClient {
       body,
     );
   }
+  /** Top-N endpoint search for a service. The per-layer Endpoint
+   *  dashboard's picker calls this with the operator's search term;
+   *  endpoints are unbounded by nature so we don't page through them.
+   *  `limit` is clamped 20…50 by the BFF. */
+  layerEndpoints(
+    layerKey: string,
+    service: string,
+    query: string,
+    limit = 20,
+  ): Promise<{
+    layer: string;
+    service: string;
+    query: string;
+    limit: number;
+    generatedAt: number;
+    endpoints: Array<{ id: string; name: string }>;
+    reachable: boolean;
+    error?: string;
+  }> {
+    const qs = new URLSearchParams({
+      service,
+      q: query,
+      limit: String(limit),
+    });
+    return this.request(
+      'GET',
+      `/api/layer/${encodeURIComponent(layerKey)}/endpoints?${qs.toString()}`,
+    );
+  }
+
+  /** Service-map feed for the per-layer Topology tab. Returns the
+   *  service neighbourhood centred on `service` (or the whole layer
+   *  if omitted), each real node decorated with cpm / resp_time / sla.
+   *  Depth controls BFS expansion (1…3); the operator can ratchet
+   *  this up to inspect indirect callers. */
+  layerTopology(layerKey: string, service?: string, depth = 1): Promise<TopologyResponse> {
+    const qs = new URLSearchParams();
+    if (service) qs.set('service', service);
+    qs.set('depth', String(depth));
+    return this.request(
+      'GET',
+      `/api/layer/${encodeURIComponent(layerKey)}/topology?${qs.toString()}`,
+    );
+  }
+
+  /** API-dependency feed. Resolves `endpoint` (name or id) to an
+   *  endpoint id via findEndpoint, then walks
+   *  `getEndpointDependencies` to surface upstream callers and
+   *  downstream callees with per-node MQE. */
+  layerEndpointDependency(
+    layerKey: string,
+    service: string,
+    endpoint: string,
+  ): Promise<EndpointDependencyResponse> {
+    const qs = new URLSearchParams({ service, endpoint });
+    return this.request(
+      'GET',
+      `/api/layer/${encodeURIComponent(layerKey)}/endpoint-dependency?${qs.toString()}`,
+    );
+  }
+
+  /** List active instances for a service. The per-layer Instance
+   *  dashboard surfaces a second selector below the service picker;
+   *  this feeds it. Accepts the service id or name. */
+  layerInstances(
+    layerKey: string,
+    service: string,
+  ): Promise<{
+    layer: string;
+    service: string;
+    generatedAt: number;
+    instances: Array<{
+      id: string;
+      name: string;
+      language: string | null;
+      attributes: Array<{ name: string; value: string }>;
+    }>;
+    reachable: boolean;
+    error?: string;
+  }> {
+    const qs = `?service=${encodeURIComponent(service)}`;
+    return this.request(
+      'GET',
+      `/api/layer/${encodeURIComponent(layerKey)}/instances${qs}`,
+    );
+  }
+
   saveLayerTemplate(template: AdminLayerTemplate): Promise<{ template: AdminLayerTemplate }> {
     return this.request<{ template: AdminLayerTemplate }>(
       'POST',

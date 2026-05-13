@@ -44,8 +44,14 @@ function componentsToCaps(components: LayerComponentFlags): LayerCaps {
     processTopology: !!components.topology,
     traces: !!components.traces,
     logs: !!components.logs,
-    profiling: !!components.profiling,
+    traceProfiling: !!components.traceProfiling,
+    ebpfProfiling: !!components.ebpfProfiling,
+    asyncProfiling: !!components.asyncProfiling,
     events: false,
+    // Bundled service-count tile defaults on — every layer benefits
+    // from the headline count, and operators can opt out per-layer
+    // from the setup card's Features section.
+    serviceCountTile: true,
   };
 }
 
@@ -117,7 +123,8 @@ const LAYER_DEFAULTS: Record<string, { color: string; slots: LayerSlots; caps: L
     slots: { services: 'Services', instances: 'Instances', endpoints: 'API', endpointDependency: 'API dependency' },
     caps: {
       serviceMap: true, endpointDependency: true, instanceTopology: true, processTopology: true,
-      dashboards: true, traces: true, logs: true, profiling: true, events: true,
+      dashboards: true, traces: true, logs: true,
+      traceProfiling: true, ebpfProfiling: true, asyncProfiling: true, events: true,
     },
   },
   MESH: {
@@ -179,6 +186,7 @@ function deriveLayer(
       documentLink: tpl.documentLink ?? item?.documentLink ?? undefined,
       slots: tpl.slots,
       caps: componentsToCaps(tpl.components),
+      header: tpl.header,
       metrics: tpl.metrics,
       overview: tpl.overview,
     };

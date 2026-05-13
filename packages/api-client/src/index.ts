@@ -22,8 +22,11 @@ export type {
   LayerDef,
   LayerMetricsColumn,
   LayerMetricsConfig,
+  LayerHeaderConfig,
   LayerOverviewConfig,
   MenuResponse,
+  OverviewGroup,
+  OverviewMetric,
 } from './menu.js';
 export type {
   AggregationKind,
@@ -37,6 +40,7 @@ export type {
 export type { LandingAggregates, LandingResponse, LandingServiceRow } from './landing.js';
 export type {
   DashboardConfig,
+  DashboardRecordItem,
   DashboardResponse,
   DashboardScope,
   DashboardSeries,
@@ -45,6 +49,17 @@ export type {
   DashboardWidgetResult,
   DashboardWidgetType,
 } from './dashboard.js';
+export type {
+  TopologyMetricDef,
+  TopologyConfig,
+  EndpointDependencyConfig,
+  TopologyNode,
+  TopologyCall,
+  TopologyResponse,
+  EndpointDependencyNode,
+  EndpointDependencyCall,
+  EndpointDependencyResponse,
+} from './topology.js';
 export type { OapInfo } from './oap-info.js';
 export { parseOapTimezoneMinutes } from './oap-info.js';
 export {

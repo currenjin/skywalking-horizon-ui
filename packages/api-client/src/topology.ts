@@ -1,0 +1,186 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * Wire types for the per-layer service-map and API-dependency feeds.
+ *
+ * Both feeds share one shape: a list of node + edge metric *definitions*
+ * (label, MQE, unit, visual role) and a list of nodes/edges carrying
+ * a `metrics: Record<id, number | null>` keyed by the definitions' ids.
+ *
+ * Why this shape?
+ *   - The MQE expression for every metric (cpm, sla, …) is now operator-
+ *     editable per layer (mirrors booster-ui's `nodeExpressions` /
+ *     `linkServerExpressions` / `linkClientExpressions` settings).
+ *   - The visual mapping (which metric drives the circle's ring colour,
+ *     which renders as the centre value, what unit to print) is also
+ *     operator-editable via the `role` and `unit` fields.
+ *   - Adding a new metric to a layer's topology requires JSON edits only;
+ *     the renderer iterates over `topology.nodeMetrics` blindly.
+ *
+ * The legacy node-level shortcut fields (`cpm`, `respTime`, `sla` and
+ * the per-side server/client variants on edges) are kept around for
+ * back-compat with older client code; new UI should read from `metrics`
+ * keyed by metric id.
+ */
+
+/** One operator-editable metric on a topology node or edge. */
+export interface TopologyMetricDef {
+  /** Stable id keyed in the per-node / per-edge `metrics` map. */
+  id: string;
+  /** Display label (UI surfaces this in tooltips + detail panels). */
+  label: string;
+  /** The MQE expression evaluated against the entity scope. */
+  mqe: string;
+  /** Optional unit shown next to the value (e.g. `"rpm"`, `"ms"`, `"%"`). */
+  unit?: string;
+  /**
+   * Visual binding for the renderer:
+   *   - `center`     — number printed in the centre of the circle / box.
+   *   - `ring`       — controls the node's perimeter colour band.
+   *   - `secondary`  — surfaced in detail panel + edge tooltip.
+   *   - `lineServer` — drives edge thickness / labels on the server side.
+   *   - `lineClient` — same, client side.
+   * Absent ⇒ tooltip-only.
+   */
+  role?: 'center' | 'ring' | 'secondary' | 'lineServer' | 'lineClient';
+  /** Aggregation across the duration window. Defaults to `avg`. */
+  aggregation?: 'sum' | 'avg';
+}
+
+/** Operator-editable topology dashboard config. Lives in the layer
+ *  JSON's `topology` block. */
+export interface TopologyConfig {
+  /** Per-node MQE under `{ scope: Service }`. */
+  nodeMetrics: TopologyMetricDef[];
+  /** Per-edge MQE under `{ scope: ServiceRelation, ..., side: server }`. */
+  linkServerMetrics?: TopologyMetricDef[];
+  /** Per-edge MQE under `{ scope: ServiceRelation, ..., side: client }`. */
+  linkClientMetrics?: TopologyMetricDef[];
+}
+
+/** Operator-editable endpoint-dependency dashboard config. Lives in the
+ *  layer JSON's `endpointDependency` block. */
+export interface EndpointDependencyConfig {
+  /** Per-node MQE under `{ scope: Endpoint }`. */
+  nodeMetrics: TopologyMetricDef[];
+  /** Per-edge MQE under `{ scope: EndpointRelation }`. OAP exposes
+   *  only a server-side family here so there's no client list. */
+  linkMetrics?: TopologyMetricDef[];
+}
+
+export interface TopologyNode {
+  id: string;
+  name: string;
+  type: string | null;
+  isReal: boolean;
+  layers: string[];
+  /** Keyed by `TopologyMetricDef.id`. Missing keys ⇒ null. */
+  metrics: Record<string, number | null>;
+  /** @deprecated use `metrics['cpm']`. Kept for older callers. */
+  cpm: number | null;
+  /** @deprecated use `metrics['respTime']`. */
+  respTime: number | null;
+  /** @deprecated use `metrics['sla']`. */
+  sla: number | null;
+}
+
+export interface TopologyCall {
+  id: string;
+  source: string;
+  target: string;
+  detectPoints: string[];
+  /** Keyed by `linkServerMetrics[].id`. */
+  serverMetrics: Record<string, number | null>;
+  /** Keyed by `linkClientMetrics[].id`. */
+  clientMetrics: Record<string, number | null>;
+  /** Time-series buckets for each server-side line metric. Same id
+   *  key as `serverMetrics`; the value is one number-per-minute over
+   *  the duration window so the edge panel can render a sparkline. */
+  serverMetricSeries: Record<string, Array<number | null> | null>;
+  /** Same shape, client side. */
+  clientMetricSeries: Record<string, Array<number | null> | null>;
+  /** @deprecated convenience read of `serverMetrics['cpm']`. */
+  serverCpm: number | null;
+  /** @deprecated convenience read of `serverMetrics['respTime']`. */
+  serverRespTime: number | null;
+  /** @deprecated convenience read of `clientMetrics['cpm']`. */
+  clientCpm: number | null;
+  /** @deprecated convenience read of `clientMetrics['respTime']`. */
+  clientRespTime: number | null;
+}
+
+export interface TopologyResponse {
+  layer: string;
+  service: string | null;
+  depth: number;
+  generatedAt: number;
+  /** Echo of the operator-edited config so the SPA doesn't need a
+   *  separate `GET /api/layer/:key/topology/config` round-trip. */
+  config: TopologyConfig;
+  nodes: TopologyNode[];
+  calls: TopologyCall[];
+  reachable: boolean;
+  error?: string;
+}
+
+export interface EndpointDependencyNode {
+  id: string;
+  name: string;
+  serviceId: string;
+  serviceName: string;
+  type: string | null;
+  isReal: boolean;
+  /** Keyed by `EndpointDependencyConfig.nodeMetrics[].id`. */
+  metrics: Record<string, number | null>;
+  /** @deprecated use `metrics['cpm']`. */
+  cpm: number | null;
+  /** @deprecated use `metrics['respTime']`. */
+  respTime: number | null;
+  /** @deprecated use `metrics['sla']`. */
+  sla: number | null;
+}
+
+export interface EndpointDependencyCall {
+  id: string;
+  source: string;
+  target: string;
+  detectPoints: string[];
+  /** Keyed by `linkMetrics[].id`. Server-side only — OAP doesn't
+   *  expose a client family for endpoint relations. */
+  metrics: Record<string, number | null>;
+  /** Time-series buckets per `linkMetrics[].id`. Same shape as
+   *  `TopologyCall.serverMetricSeries`. */
+  metricSeries: Record<string, Array<number | null> | null>;
+  /** @deprecated convenience read. */
+  cpm: number | null;
+  /** @deprecated convenience read. */
+  respTime: number | null;
+}
+
+export interface EndpointDependencyResponse {
+  layer: string;
+  service: string | null;
+  endpoint: string | null;
+  endpointId: string | null;
+  generatedAt: number;
+  config: EndpointDependencyConfig;
+  nodes: EndpointDependencyNode[];
+  calls: EndpointDependencyCall[];
+  reachable: boolean;
+  error?: string;
+}

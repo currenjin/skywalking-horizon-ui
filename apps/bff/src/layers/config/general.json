@@ -17,9 +17,11 @@
     "topology": true,
     "traces": true,
     "logs": true,
-    "profiling": true
+    "traceProfiling": true,
+    "ebpfProfiling": true,
+    "asyncProfiling": true
   },
-  "metrics": {
+  "layer-header": {
     "orderBy": "cpm",
     "columns": [
       { "metric": "cpm", "label": "RPM", "mqe": "service_cpm", "aggregation": "sum" },
@@ -28,8 +30,50 @@
     ]
   },
   "overview": {
-    "throughput": "cpm",
-    "spark": "cpm"
+    "groups": [
+      {
+        "title": "Throughput",
+        "size": "auto",
+        "metrics": [
+          {
+            "id": "rpm",
+            "label": "RPM",
+            "tip": "Requests per minute across the layer.",
+            "mqe": "service_cpm",
+            "aggregation": "sum"
+          },
+          {
+            "id": "p99",
+            "label": "P99",
+            "tip": "99th-percentile response time across the layer.",
+            "mqe": "service_percentile{p='99'}",
+            "unit": "ms",
+            "aggregation": "avg"
+          },
+          {
+            "id": "err",
+            "label": "Error Rate",
+            "tip": "100 − SLA. Higher = worse.",
+            "mqe": "100 - service_sla/100",
+            "unit": "%",
+            "aggregation": "avg"
+          }
+        ]
+      },
+      {
+        "title": "Health",
+        "size": "square",
+        "metrics": [
+          {
+            "id": "apdex",
+            "label": "Apdex",
+            "tip": "User-satisfaction score on a 0 – 1 scale.",
+            "mqe": "service_apdex/10000",
+            "aggregation": "avg"
+          }
+        ]
+      }
+    ]
   },
   "dashboards": {
     "service": [
@@ -141,21 +185,32 @@
         "expressions": ["top_n(service_instance_sla,10,asc)/100"],
         "span": 4,
         "rowSpan": 3
+      },
+      {
+        "id": "slow_statements",
+        "title": "Slow Database Statements",
+        "tip": "Top 20 slowest database statements captured against this service. Sourced from top_n_service_database_statement. Shows `no data` when OAP has captured no statements in the window.",
+        "type": "record",
+        "unit": "ms",
+        "expressions": ["top_n(top_n_service_database_statement, 20, des)"],
+        "span": 12,
+        "rowSpan": 4
       }
     ],
     "instance": [
       {
         "id": "instance_cpm_line",
-        "title": "Traffic",
+        "title": "Service Instance Load",
+        "tip": "Calls per minute against the selected instance.",
         "type": "line",
-        "unit": "rpm",
+        "unit": "calls / min",
         "expressions": ["service_instance_cpm"],
         "span": 4,
         "rowSpan": 2
       },
       {
         "id": "instance_resp_line",
-        "title": "Response Time",
+        "title": "Service Instance Latency",
         "type": "line",
         "unit": "ms",
         "expressions": ["service_instance_resp_time"],
@@ -164,7 +219,7 @@
       },
       {
         "id": "instance_sla_line",
-        "title": "Success Rate",
+        "title": "Service Instance Success Rate",
         "type": "line",
         "unit": "%",
         "expressions": ["service_instance_sla/100"],
@@ -174,21 +229,642 @@
       {
         "id": "jvm_cpu",
         "title": "JVM CPU",
-        "tip": "Renders only when the instance reports JVM metrics.",
+        "tip": "JVM CPU as reported by the agent. Renders only when the instance is a JVM.",
         "type": "line",
         "unit": "%",
         "expressions": ["instance_jvm_cpu"],
         "visibleWhen": "instance_jvm_cpu has value",
-        "span": 6,
+        "span": 3,
         "rowSpan": 2
       },
       {
-        "id": "jvm_heap",
-        "title": "JVM Heap",
+        "id": "jvm_memory",
+        "title": "JVM Memory",
+        "tip": "Heap / non-heap used + max in MB.",
         "type": "line",
-        "expressions": ["instance_jvm_memory{name='heap'}"],
-        "visibleWhen": "instance_jvm_memory has value",
-        "span": 6,
+        "unit": "MB",
+        "expressions": [
+          "instance_jvm_memory_heap/1048576",
+          "instance_jvm_memory_heap_max/1048576",
+          "instance_jvm_memory_noheap/1048576",
+          "instance_jvm_memory_noheap_max/1048576"
+        ],
+        "expressionLabels": ["heap", "heap max", "non-heap", "non-heap max"],
+        "visibleWhen": "instance_jvm_memory_heap has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "jvm_memory_detail",
+        "title": "JVM Memory Detail",
+        "tip": "Per-pool used memory in MB. Covers code cache, young / old / survivor / permgen / metaspace, and the JIT codeheap sub-pools introduced in newer JVMs (Z heap, compressed class space, segmented codeheaps). Pools the JVM doesn't expose simply stay at 0.",
+        "type": "line",
+        "unit": "MB",
+        "expressions": [
+          "instance_jvm_memory_pool_code_cache/1048576",
+          "instance_jvm_memory_pool_newgen/1048576",
+          "instance_jvm_memory_pool_oldgen/1048576",
+          "instance_jvm_memory_pool_survivor/1048576",
+          "instance_jvm_memory_pool_permgen/1048576",
+          "instance_jvm_memory_pool_metaspace/1048576",
+          "instance_jvm_memory_pool_zheap/1048576",
+          "instance_jvm_memory_pool_compressed_class_space/1048576",
+          "instance_jvm_memory_pool_codeheap_non_nmethods/1048576",
+          "instance_jvm_memory_pool_codeheap_profiled_nmethods/1048576",
+          "instance_jvm_memory_pool_codeheap_non_profiled_nmethods/1048576"
+        ],
+        "expressionLabels": [
+          "code cache",
+          "newgen",
+          "oldgen",
+          "survivor",
+          "permgen",
+          "metaspace",
+          "zheap",
+          "compressed class space",
+          "codeheap (non-nmethods)",
+          "codeheap (profiled nmethods)",
+          "codeheap (non-profiled nmethods)"
+        ],
+        "visibleWhen": "instance_jvm_memory_pool_code_cache has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "jvm_thread_count",
+        "title": "JVM Thread Count",
+        "type": "line",
+        "expressions": [
+          "instance_jvm_thread_live_count",
+          "instance_jvm_thread_daemon_count",
+          "instance_jvm_thread_peak_count"
+        ],
+        "expressionLabels": ["live", "daemon", "peak"],
+        "visibleWhen": "instance_jvm_thread_live_count has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "jvm_thread_state",
+        "title": "JVM Thread State Count",
+        "tip": "Threads by JVM state (runnable / blocked / waiting / timed-waiting).",
+        "type": "line",
+        "expressions": [
+          "instance_jvm_thread_runnable_state_thread_count",
+          "instance_jvm_thread_blocked_state_thread_count",
+          "instance_jvm_thread_waiting_state_thread_count",
+          "instance_jvm_thread_timed_waiting_state_thread_count"
+        ],
+        "expressionLabels": ["runnable", "blocked", "waiting", "timed-waiting"],
+        "visibleWhen": "instance_jvm_thread_runnable_state_thread_count has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "jvm_gc_time",
+        "title": "JVM GC Time",
+        "type": "line",
+        "unit": "ms",
+        "expressions": [
+          "instance_jvm_young_gc_time",
+          "instance_jvm_old_gc_time",
+          "instance_jvm_normal_gc_time"
+        ],
+        "expressionLabels": ["young", "old", "normal"],
+        "visibleWhen": "instance_jvm_young_gc_time has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "jvm_gc_count",
+        "title": "JVM GC Count",
+        "type": "line",
+        "expressions": [
+          "instance_jvm_young_gc_count",
+          "instance_jvm_old_gc_count",
+          "instance_jvm_normal_gc_count"
+        ],
+        "expressionLabels": ["young", "old", "normal"],
+        "visibleWhen": "instance_jvm_young_gc_count has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "jvm_class_count",
+        "title": "JVM Class Count",
+        "type": "line",
+        "expressions": [
+          "instance_jvm_class_loaded_class_count",
+          "instance_jvm_class_total_loaded_class_count",
+          "instance_jvm_class_total_unloaded_class_count"
+        ],
+        "expressionLabels": ["loaded", "total loaded", "total unloaded"],
+        "visibleWhen": "instance_jvm_class_loaded_class_count has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "clr_cpu",
+        "title": "CLR CPU",
+        "tip": ".NET-only: renders when the instance reports CLR metrics.",
+        "type": "line",
+        "unit": "%",
+        "expressions": ["instance_clr_cpu"],
+        "visibleWhen": "instance_clr_cpu has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "clr_thread",
+        "title": "CLR Thread",
+        "type": "line",
+        "expressions": [
+          "instance_clr_available_worker_threads",
+          "instance_clr_available_completion_port_threads",
+          "instance_clr_max_completion_port_threads"
+        ],
+        "expressionLabels": ["worker available", "completion-port available", "completion-port max"],
+        "visibleWhen": "instance_clr_available_worker_threads has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "clr_heap",
+        "title": "CLR Heap Memory",
+        "type": "line",
+        "unit": "MB",
+        "expressions": ["instance_clr_heap_memory/1048576"],
+        "visibleWhen": "instance_clr_heap_memory has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "clr_gc",
+        "title": "CLR GC",
+        "type": "line",
+        "expressions": [
+          "instance_clr_gen0_collect_count",
+          "instance_clr_gen1_collect_count",
+          "instance_clr_gen2_collect_count"
+        ],
+        "expressionLabels": ["gen 0", "gen 1", "gen 2"],
+        "visibleWhen": "instance_clr_gen0_collect_count has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "sleuth_http_req_count",
+        "title": "Spring HTTP Request Count",
+        "tip": "Spring Sleuth / Spring Boot Actuator — http.server.requests counter.",
+        "type": "line",
+        "expressions": ["meter_http_server_requests_count"],
+        "visibleWhen": "meter_http_server_requests_count has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "sleuth_http_req_duration",
+        "title": "Spring HTTP Request Duration",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["meter_http_server_requests_duration"],
+        "visibleWhen": "meter_http_server_requests_duration has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "sleuth_proc_cpu",
+        "title": "Spring Instance CPU Usage",
+        "type": "line",
+        "unit": "%",
+        "expressions": ["meter_process_cpu_usage"],
+        "visibleWhen": "meter_process_cpu_usage has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "sleuth_os_cpu",
+        "title": "Spring OS CPU Usage",
+        "type": "line",
+        "unit": "%",
+        "expressions": ["meter_system_cpu_usage"],
+        "visibleWhen": "meter_system_cpu_usage has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "sleuth_os_load",
+        "title": "Spring OS System Load",
+        "type": "line",
+        "expressions": ["meter_system_load_average_1m"],
+        "visibleWhen": "meter_system_load_average_1m has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "sleuth_proc_files",
+        "title": "Spring OS Process Files",
+        "type": "line",
+        "expressions": [
+          "meter_process_files_open",
+          "meter_process_files_max"
+        ],
+        "expressionLabels": ["open", "max"],
+        "visibleWhen": "meter_process_files_open has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "sleuth_jvm_gc_pause",
+        "title": "Spring JVM GC Pause Duration",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["meter_jvm_gc_pause_duration"],
+        "visibleWhen": "meter_jvm_gc_pause_duration has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "sleuth_jvm_memory",
+        "title": "Spring JVM Memory",
+        "type": "line",
+        "unit": "MB",
+        "expressions": [
+          "meter_jvm_memory_used/1048576",
+          "meter_jvm_memory_max/1048576"
+        ],
+        "expressionLabels": ["used", "max"],
+        "visibleWhen": "meter_jvm_memory_used has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "sleuth_jvm_thread",
+        "title": "Spring JVM Threads",
+        "type": "line",
+        "expressions": [
+          "meter_jvm_threads_live",
+          "meter_jvm_threads_daemon",
+          "meter_jvm_threads_peak"
+        ],
+        "expressionLabels": ["live", "daemon", "peak"],
+        "visibleWhen": "meter_jvm_threads_live has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "sleuth_jvm_classes",
+        "title": "Spring JVM Classes",
+        "type": "line",
+        "expressions": [
+          "meter_jvm_classes_loaded",
+          "meter_jvm_classes_unloaded"
+        ],
+        "expressionLabels": ["loaded", "unloaded"],
+        "visibleWhen": "meter_jvm_classes_loaded has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "sleuth_datasource",
+        "title": "Spring Database Connection Pool",
+        "tip": "HikariCP / Spring Boot datasource metrics — connection counts per pool.",
+        "type": "line",
+        "expressions": ["meter_datasource"],
+        "visibleWhen": "meter_datasource has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "sleuth_thread_pool",
+        "title": "Spring Thread Pool",
+        "tip": "Spring Boot thread pool meters — active, queued, max threads per executor.",
+        "type": "line",
+        "expressions": ["meter_thread_pool"],
+        "visibleWhen": "meter_thread_pool has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "sleuth_jdbc",
+        "title": "Spring JDBC Connections",
+        "type": "line",
+        "expressions": [
+          "meter_jdbc_connections_active",
+          "meter_jdbc_connections_idle",
+          "meter_jdbc_connections_max"
+        ],
+        "expressionLabels": ["active", "idle", "max"],
+        "visibleWhen": "meter_jdbc_connections_active has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "sleuth_tomcat",
+        "title": "Spring Tomcat Sessions",
+        "type": "line",
+        "expressions": [
+          "meter_tomcat_sessions_active_current",
+          "meter_tomcat_sessions_active_max",
+          "meter_tomcat_sessions_rejected"
+        ],
+        "expressionLabels": ["active", "max", "rejected"],
+        "visibleWhen": "meter_tomcat_sessions_active_current has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "go_goroutines",
+        "title": "Golang Goroutines / OS Threads",
+        "tip": "Golang agent: live goroutine count + underlying OS threads.",
+        "type": "line",
+        "expressions": [
+          "meter_instance_golang_live_goroutines_num",
+          "meter_instance_golang_os_threads_num"
+        ],
+        "expressionLabels": ["goroutines", "OS threads"],
+        "visibleWhen": "meter_instance_golang_live_goroutines_num has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "go_gc_pause",
+        "title": "Golang GC Pause Time (per minute)",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["meter_instance_golang_gc_pauses/1000000"],
+        "visibleWhen": "meter_instance_golang_gc_pauses has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "go_gc_count",
+        "title": "Golang GC Count (per minute)",
+        "type": "line",
+        "expressions": ["meter_instance_golang_gc_count_labeled"],
+        "visibleWhen": "meter_instance_golang_gc_count_labeled has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "go_heap_alloc",
+        "title": "Golang Heap Alloc (per minute)",
+        "type": "line",
+        "unit": "MB",
+        "expressions": ["meter_instance_golang_heap_alloc_rate/1048576"],
+        "visibleWhen": "meter_instance_golang_heap_alloc_rate has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "go_sched_lat",
+        "title": "Golang Goroutine Schedule Time",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["meter_instance_golang_sched_latencies/1000000"],
+        "visibleWhen": "meter_instance_golang_sched_latencies has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "go_heap_frees",
+        "title": "Golang GC Free (per minute)",
+        "type": "line",
+        "unit": "MB",
+        "expressions": ["meter_instance_golang_heap_frees/1048576"],
+        "visibleWhen": "meter_instance_golang_heap_frees has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "go_alloc_size",
+        "title": "Golang Alloc Size (per minute)",
+        "type": "line",
+        "unit": "KB",
+        "expressions": ["meter_instance_golang_gc_heap_allocs_by_size/1024"],
+        "visibleWhen": "meter_instance_golang_gc_heap_allocs_by_size has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "go_free_size",
+        "title": "Golang Free Size (per minute)",
+        "type": "line",
+        "unit": "KB",
+        "expressions": ["meter_instance_golang_gc_heap_frees_by_size/1024"],
+        "visibleWhen": "meter_instance_golang_gc_heap_frees_by_size has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "go_heap_objects",
+        "title": "Golang Heap Objects",
+        "type": "line",
+        "expressions": ["meter_instance_golang_gc_heap_objects"],
+        "visibleWhen": "meter_instance_golang_gc_heap_objects has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "go_heap",
+        "title": "Golang Heap",
+        "type": "line",
+        "unit": "MB",
+        "expressions": ["meter_instance_golang_memory_heap_labeled/1048576"],
+        "visibleWhen": "meter_instance_golang_memory_heap_labeled has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "go_mspan",
+        "title": "Golang Metadata Mspan",
+        "type": "line",
+        "unit": "MB",
+        "expressions": ["meter_instance_golang_metadata_mspan_labeled"],
+        "visibleWhen": "meter_instance_golang_metadata_mspan_labeled has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "go_mcache",
+        "title": "Golang Metadata Mcache",
+        "type": "line",
+        "unit": "MB",
+        "expressions": ["meter_instance_golang_metadata_mcache_labeled"],
+        "visibleWhen": "meter_instance_golang_metadata_mcache_labeled has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "go_gc_goal",
+        "title": "Golang GC Goal Size",
+        "type": "line",
+        "unit": "MB",
+        "expressions": ["meter_instance_golang_gc_heap_goal/1048576"],
+        "visibleWhen": "meter_instance_golang_gc_heap_goal has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "go_cgo",
+        "title": "Golang CGO Calls (per minute)",
+        "type": "line",
+        "expressions": ["meter_instance_golang_cgo_calls"],
+        "visibleWhen": "meter_instance_golang_cgo_calls has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "pvm_cpu",
+        "title": "Python CPU Utilization",
+        "tip": "Python (PVM) agent: host vs process CPU.",
+        "type": "line",
+        "unit": "%",
+        "expressions": [
+          "meter_instance_pvm_total_cpu_utilization",
+          "meter_instance_pvm_process_cpu_utilization"
+        ],
+        "expressionLabels": ["host", "process"],
+        "visibleWhen": "meter_instance_pvm_process_cpu_utilization has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "pvm_mem",
+        "title": "Python Memory Utilization",
+        "type": "line",
+        "unit": "%",
+        "expressions": [
+          "meter_instance_pvm_total_mem_utilization",
+          "meter_instance_pvm_process_mem_utilization"
+        ],
+        "expressionLabels": ["host", "process"],
+        "visibleWhen": "meter_instance_pvm_process_mem_utilization has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "pvm_threads",
+        "title": "Python Thread Count",
+        "type": "line",
+        "expressions": ["meter_instance_pvm_thread_active_count"],
+        "visibleWhen": "meter_instance_pvm_thread_active_count has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "pvm_gc",
+        "title": "Python GC Count",
+        "type": "line",
+        "expressions": [
+          "meter_instance_pvm_gc_g0",
+          "meter_instance_pvm_gc_g1",
+          "meter_instance_pvm_gc_g2"
+        ],
+        "expressionLabels": ["gen 0", "gen 1", "gen 2"],
+        "visibleWhen": "meter_instance_pvm_gc_g0 has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "pvm_gc_time",
+        "title": "Python GC Time",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["meter_instance_pvm_gc_time"],
+        "visibleWhen": "meter_instance_pvm_gc_time has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "ruby_cpu",
+        "title": "Ruby CPU Usage",
+        "tip": "Ruby agent: process CPU as a percentage.",
+        "type": "line",
+        "unit": "%",
+        "expressions": ["meter_instance_ruby_cpu_usage_percent"],
+        "visibleWhen": "meter_instance_ruby_cpu_usage_percent has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "ruby_mem_rss",
+        "title": "Ruby Memory (RSS)",
+        "type": "line",
+        "unit": "MB",
+        "expressions": ["meter_instance_ruby_memory_rss_mb"],
+        "visibleWhen": "meter_instance_ruby_memory_rss_mb has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "ruby_mem_usage",
+        "title": "Ruby Memory Usage",
+        "type": "line",
+        "unit": "%",
+        "expressions": ["meter_instance_ruby_memory_usage_percent"],
+        "visibleWhen": "meter_instance_ruby_memory_usage_percent has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "ruby_threads",
+        "title": "Ruby Thread Status",
+        "type": "line",
+        "expressions": [
+          "meter_instance_ruby_thread_count_active",
+          "meter_instance_ruby_thread_count_running"
+        ],
+        "expressionLabels": ["active", "running"],
+        "visibleWhen": "meter_instance_ruby_thread_count_active has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "ruby_gc",
+        "title": "Ruby GC Count",
+        "type": "line",
+        "expressions": [
+          "meter_instance_ruby_gc_count_total",
+          "meter_instance_ruby_gc_minor_count_total",
+          "meter_instance_ruby_gc_major_count_total"
+        ],
+        "expressionLabels": ["total", "minor", "major"],
+        "visibleWhen": "meter_instance_ruby_gc_count_total has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "ruby_gc_time",
+        "title": "Ruby GC Time",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["meter_instance_ruby_gc_time_total"],
+        "visibleWhen": "meter_instance_ruby_gc_time_total has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "ruby_heap_usage",
+        "title": "Ruby Heap Usage",
+        "type": "line",
+        "unit": "%",
+        "expressions": ["meter_instance_ruby_heap_usage_percent"],
+        "visibleWhen": "meter_instance_ruby_heap_usage_percent has value",
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "ruby_heap_slots",
+        "title": "Ruby Heap Slots",
+        "type": "line",
+        "expressions": [
+          "meter_instance_ruby_heap_live_slots_count",
+          "meter_instance_ruby_heap_available_slots_count"
+        ],
+        "expressionLabels": ["live", "available"],
+        "visibleWhen": "meter_instance_ruby_heap_live_slots_count has value",
+        "span": 3,
         "rowSpan": 2
       }
     ],
@@ -230,9 +906,22 @@
         ],
         "span": 12,
         "rowSpan": 2
+      },
+      {
+        "id": "endpoint_mq_consume_latency",
+        "title": "MQ Avg Consuming Latency",
+        "tip": "Endpoint-scope consume latency — only populated for endpoints serving message-queue traffic.",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["endpoint_mq_consume_latency"],
+        "visibleWhen": "endpoint_mq_consume_latency has value",
+        "span": 12,
+        "rowSpan": 2
       }
     ],
     "trace": [],
-    "profiling": []
+    "traceProfiling": [],
+    "ebpfProfiling": [],
+    "asyncProfiling": []
   }
 }

@@ -33,22 +33,38 @@ import TimeChart from '@/components/charts/TimeChart.vue';
 import TopList from '@/components/charts/TopList.vue';
 import { colorForMetric } from '@/composables/metricColor';
 import { useLayerDashboard, useLayerDashboardConfig } from '@/composables/useLayerDashboard';
+import { useLayerEndpoints } from '@/composables/useLayerEndpoints';
+import { useLayerInstances } from '@/composables/useLayerInstances';
 import { useLayerLanding } from '@/composables/useLayerLanding';
 import { useLayers } from '@/composables/useLayers';
+import { useSelectedEndpoint } from '@/composables/useSelectedEndpoint';
+import { useSelectedInstance } from '@/composables/useSelectedInstance';
 import { useSelectedService } from '@/composables/useSelectedService';
 import { useSetupStore } from '@/stores/setup';
 import { fmtMetric } from '@/utils/formatters';
+import { ref, watch, watchEffect } from 'vue';
 
 const route = useRoute();
 const layerKey = computed(() => String(route.params.layerKey ?? ''));
-// Scope is inferred from the active sub-route (`service` / `instance`
-// / `endpoint` / `trace` / `profiling`). The view is shared across
-// all per-layer scope routes, the BFF returns a different widget set
-// per scope.
+// Scope is inferred from the active sub-route. Profiling is split
+// into three independent scopes (trace / eBPF / async), each with its
+// own widget set on the layer template; the route segment is
+// kebab-cased so the URL stays readable.
+const ROUTE_TO_SCOPE: Record<string, string> = {
+  instance: 'instance',
+  endpoint: 'endpoint',
+  trace: 'trace',
+  logs: 'logs',
+  topology: 'topology',
+  dependency: 'dependency',
+  'trace-profiling': 'traceProfiling',
+  'ebpf-profiling': 'ebpfProfiling',
+  'async-profiling': 'asyncProfiling',
+};
 const scope = computed<string>(() => {
   const path = route.path;
-  for (const s of ['instance', 'endpoint', 'trace', 'profiling']) {
-    if (path.endsWith(`/${s}`)) return s;
+  for (const segment of Object.keys(ROUTE_TO_SCOPE)) {
+    if (path.endsWith(`/${segment}`)) return ROUTE_TO_SCOPE[segment];
   }
   return 'service';
 });
@@ -83,7 +99,116 @@ const mockTop = computed<number>(() => {
 });
 
 const { config, isLoading: configLoading } = useLayerDashboardConfig(layerKey, scope);
-const { data, isFetching, error } = useLayerDashboard(layerKey, serviceName, scope, mockTop);
+
+// Instance selection: only meaningful on the Instance scope, but the
+// selector renders whenever a service is picked AND scope === instance.
+// Cleared automatically when the service changes so a stale instance
+// from a previous service doesn't bleed into the next one's queries.
+const { selectedInstance, setSelectedInstance } = useSelectedInstance();
+const { instances: instanceList, isFetching: instancesLoading } = useLayerInstances(
+  layerKey,
+  serviceName,
+);
+/** Track which row's attributes panel is open. Mutually exclusive —
+ *  expanding one collapses the previous so the list stays compact. */
+const expandedInstance = ref<string | null>(null);
+
+/** Auto-pick the first available service when the operator lands on
+ *  the Instance scope without one. The BFF's dashboard route already
+ *  falls back to the first service when none is passed, but the
+ *  instance-list endpoint needs an explicit service — so we mirror
+ *  the same fallback client-side. */
+const { setSelected: setSelectedService } = useSelectedService();
+const landingRows = computed(() => landing.data.value?.sampledRows ?? landing.rows.value ?? []);
+watch([scope, landingRows], ([s, rows]) => {
+  if (s !== 'instance') return;
+  if (selectedId.value) return;
+  const first = rows[0];
+  if (!first) return;
+  setSelectedService(first.serviceId);
+});
+// Drop the stale instance whenever the service changes — the new
+// service's instance list almost never matches the previous pick.
+watch(serviceName, (next, prev) => {
+  if (prev !== undefined && next !== prev && selectedInstance.value) {
+    setSelectedInstance(null);
+  }
+});
+// Default-select the first instance once the list arrives, but only
+// on the Instance scope (so other scopes don't bake an instance into
+// their URL on every visit).
+watch([instanceList, scope], ([list, s]) => {
+  if (s !== 'instance') return;
+  if (!selectedInstance.value && list.length > 0) {
+    setSelectedInstance(list[0].name);
+  }
+});
+
+// Endpoint selection — same pattern as instance, with a keyword
+// search box driving findEndpoint(...). Endpoints are unbounded so
+// there's no full-page paging; the picker is top 20…50. Search fires
+// on Enter (not on every keystroke) so the operator can type a
+// multi-word query without watching the BFF re-query each character.
+const { selectedEndpoint, setSelectedEndpoint } = useSelectedEndpoint();
+/** Live text in the input — bound via v-model. */
+const endpointSearchInput = ref('');
+/** Committed keyword that actually drives the BFF query. Updated on
+ *  Enter / blur via submitEndpointSearch(). */
+const endpointQuery = ref('');
+const endpointLimit = ref(20);
+function submitEndpointSearch(): void {
+  endpointQuery.value = endpointSearchInput.value.trim();
+}
+function clearEndpointSearch(): void {
+  endpointSearchInput.value = '';
+  endpointQuery.value = '';
+}
+const { endpoints: endpointList, isFetching: endpointsLoading } = useLayerEndpoints(
+  layerKey,
+  serviceName,
+  endpointQuery,
+  endpointLimit,
+);
+// Endpoint-scope orchestration — explicit sequence so the loading
+// flow is deterministic:
+//   1. wait for landing rows
+//   2. pick the first service when none is selected
+//   3. wait for that service's endpoint list to arrive (`endpointQuery`
+//      starts empty → BFF returns the recent top-N immediately)
+//   4. pick the first endpoint when none is selected
+// `watchEffect` re-fires on each dependency change and the early
+// `return` after step 2 ensures we don't try to pick an endpoint
+// before `serviceName` has propagated to `useLayerEndpoints` and the
+// list has refreshed for the new service.
+watchEffect(() => {
+  if (scope.value !== 'endpoint') return;
+  if (!selectedId.value) {
+    const first = landingRows.value[0];
+    if (first) setSelectedService(first.serviceId);
+    return;
+  }
+  if (selectedEndpoint.value) return;
+  if (endpointsLoading.value) return;
+  const first = endpointList.value[0];
+  if (first) setSelectedEndpoint(first.name);
+});
+// Drop stale endpoint when service changes.
+watch(serviceName, (next, prev) => {
+  if (prev !== undefined && next !== prev && selectedEndpoint.value) {
+    setSelectedEndpoint(null);
+  }
+});
+// Default-selection of the first endpoint happens inside the
+// `watchEffect` above so the service → endpoint sequence is
+// deterministic; no separate watch needed here.
+
+const { data, isFetching, error } = useLayerDashboard(
+  layerKey,
+  serviceName,
+  scope,
+  mockTop,
+  { instance: selectedInstance, endpoint: selectedEndpoint },
+);
 
 const widgets = computed(() => config.value?.widgets ?? []);
 const resultsById = computed(() => {
@@ -148,7 +273,15 @@ function widgetColor(w: { id?: string; title?: string; expressions?: string[] })
  */
 function isVisible(
   w: { id: string; visibleWhen?: string },
-  result: { value?: number | null; series?: Array<{ data: Array<number | null> }> } | undefined,
+  result:
+    | {
+        value?: number | null;
+        series?: Array<{ data: Array<number | null> }>;
+        topList?: Array<unknown>;
+        topGroups?: Array<{ items: Array<unknown> }>;
+        records?: Array<unknown>;
+      }
+    | undefined,
 ): boolean {
   const cond = w.visibleWhen?.trim();
   if (!cond) return true;
@@ -156,6 +289,13 @@ function isVisible(
   if (hasValueMatch && result) {
     if (result.value !== undefined && result.value !== null) return true;
     if (result.series && result.series.some((s) => s.data.some((v) => v !== null))) return true;
+    // Top + record widgets: a non-empty list counts as "has value".
+    // Without these checks, every gated `top` / `record` widget would
+    // hide itself the moment the BFF returns its rows, since neither
+    // .value nor .series is populated.
+    if (result.topList && result.topList.length > 0) return true;
+    if (result.topGroups && result.topGroups.some((g) => g.items.length > 0)) return true;
+    if (result.records && result.records.length > 0) return true;
     return false;
   }
   if (cond.startsWith('#entity.')) {
@@ -179,7 +319,153 @@ function isVisible(
       {{ errorText ?? 'Widgets are showing nothing — check the BFF is up and OAP is reachable.' }}
     </div>
 
+    <!-- Instance picker — a sticky list on the left when the Instance
+         scope is active. Each row shows the instance name, language
+         tag, and an expandable attributes property list. Auto-fires
+         once a service is selected (no manual trigger). When no
+         service is picked, we show a hint and gate the widget grid
+         so a stale instance can't sneak into queries. -->
+    <section v-if="scope === 'instance'" class="instance-bar sw-card">
+      <header class="ib-head">
+        <span class="kicker">Instance</span>
+        <span v-if="serviceName" class="for-svc">
+          for <b>{{ serviceName }}</b>
+          <span v-if="instanceList.length > 0" class="count">{{ instanceList.length }}</span>
+        </span>
+        <span v-if="instancesLoading" class="hint">loading…</span>
+      </header>
+      <div v-if="!serviceName" class="empty inline">
+        Pick a service in the picker above to list its instances.
+      </div>
+      <div v-else-if="!instancesLoading && instanceList.length === 0" class="empty inline">
+        No active instances reported for {{ serviceName }} in the last 15 minutes.
+      </div>
+      <ul v-else class="ib-list">
+        <li
+          v-for="i in instanceList"
+          :key="i.id"
+          class="ib-row"
+          :class="{ on: selectedInstance === i.name }"
+        >
+          <button
+            type="button"
+            class="ib-pick-btn"
+            @click="setSelectedInstance(i.name)"
+          >
+            <span class="ib-name">{{ i.name }}</span>
+            <span v-if="i.language" class="ib-lang">{{ i.language }}</span>
+          </button>
+          <button
+            v-if="i.attributes.length > 0"
+            type="button"
+            class="ib-expand"
+            :title="expandedInstance === i.id ? 'Collapse attributes' : 'Show attributes'"
+            @click="expandedInstance = expandedInstance === i.id ? null : i.id"
+          >
+            <span class="caret" :class="{ open: expandedInstance === i.id }">▸</span>
+            {{ i.attributes.length }} attr
+          </button>
+          <dl v-if="expandedInstance === i.id" class="ib-attrs">
+            <template v-for="a in i.attributes" :key="a.name">
+              <dt>{{ a.name }}</dt>
+              <dd>{{ a.value || '—' }}</dd>
+            </template>
+          </dl>
+        </li>
+      </ul>
+    </section>
+
+    <!-- Endpoint picker — same vertical-list shape as Instance, with
+         a search input at the top driving findEndpoint. Endpoints
+         are unbounded so we don't page through them; the BFF clamps
+         the limit to 20…50. -->
+    <section v-if="scope === 'endpoint'" class="instance-bar sw-card">
+      <header class="ib-head">
+        <span class="kicker">Endpoint</span>
+        <span v-if="serviceName" class="for-svc">
+          for <b>{{ serviceName }}</b>
+          <span v-if="endpointList.length > 0" class="count">{{ endpointList.length }}</span>
+        </span>
+        <span v-if="endpointsLoading" class="hint">loading…</span>
+      </header>
+      <div v-if="!serviceName" class="empty inline">
+        Pick a service in the picker above to search its endpoints.
+      </div>
+      <template v-else>
+        <div class="ep-controls">
+          <input
+            class="ep-search"
+            type="search"
+            placeholder="Search endpoints, press Enter…"
+            v-model="endpointSearchInput"
+            @keydown.enter.prevent="submitEndpointSearch"
+            @search="submitEndpointSearch"
+          />
+          <button
+            class="sw-btn small"
+            type="button"
+            :disabled="endpointSearchInput === endpointQuery"
+            title="Run the search (Enter)"
+            @click="submitEndpointSearch"
+          >Search</button>
+          <button
+            v-if="endpointQuery"
+            class="sw-btn ghost small"
+            type="button"
+            title="Clear the search keyword"
+            @click="clearEndpointSearch"
+          >Clear</button>
+          <label class="ep-limit" title="Endpoints are unbounded — limit clamps the top-N (20–50).">
+            <span>Top</span>
+            <select v-model.number="endpointLimit">
+              <option :value="20">20</option>
+              <option :value="30">30</option>
+              <option :value="40">40</option>
+              <option :value="50">50</option>
+            </select>
+          </label>
+        </div>
+        <div v-if="endpointQuery" class="ep-active-query">
+          Showing top {{ endpointLimit }} matches for
+          <code>{{ endpointQuery }}</code>
+        </div>
+        <div v-if="!endpointsLoading && endpointList.length === 0" class="empty inline">
+          No endpoints match
+          <code v-if="endpointQuery">{{ endpointQuery }}</code>
+          <span v-else>this service in the last 15 minutes</span>.
+        </div>
+        <ul v-else class="ib-list">
+          <li
+            v-for="e in endpointList"
+            :key="e.id"
+            class="ib-row"
+            :class="{ on: selectedEndpoint === e.name }"
+          >
+            <button
+              type="button"
+              class="ib-pick-btn"
+              @click="setSelectedEndpoint(e.name)"
+            >
+              <span class="ib-name">{{ e.name }}</span>
+            </button>
+          </li>
+        </ul>
+      </template>
+    </section>
+
     <div v-if="configLoading" class="empty">Loading dashboard config…</div>
+    <div
+      v-else-if="scope === 'endpoint' && serviceName && !selectedEndpoint"
+      class="empty"
+    >
+      Select an endpoint above to view its metrics.
+    </div>
+    <div
+      v-else-if="scope === 'instance' && serviceName && !selectedInstance"
+      class="empty"
+    >
+      Select an instance above to view its metrics.
+    </div>
     <div v-else-if="widgets.length === 0" class="empty">
       No widgets defined for this layer. Phase 7 admin will let operators add their own.
     </div>
@@ -194,7 +480,7 @@ function isVisible(
           <h4>{{ w.title }}</h4>
           <span v-if="w.unit" class="unit">{{ w.unit }}</span>
         </div>
-        <div class="w-body">
+        <div class="w-body" :class="`type-${w.type}`">
           <template v-if="resultsById.get(w.id)?.error">
             <span class="muted">{{ resultsById.get(w.id)!.error }}</span>
           </template>
@@ -226,6 +512,18 @@ function isVisible(
             <TopList
               v-else-if="resultsById.get(w.id)?.topList?.length"
               :items="resultsById.get(w.id)!.topList!"
+              :unit="w.unit"
+              :color="widgetColor(w)"
+            />
+            <span v-else class="muted">no data</span>
+          </template>
+          <template v-else-if="w.type === 'record'">
+            <!-- Slow-statement / record table — reuses the TopList
+                 renderer since the shape (name + value) is identical.
+                 Future runtime work will add trace-id drill-in. -->
+            <TopList
+              v-if="resultsById.get(w.id)?.records?.length"
+              :items="resultsById.get(w.id)!.records!"
               :unit="w.unit"
               :color="widgetColor(w)"
             />
@@ -282,6 +580,221 @@ function isVisible(
   color: var(--sw-fg-3);
   font-size: 12px;
 }
+.instance-bar {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 360px;
+}
+.ib-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--sw-line);
+}
+.ib-head .kicker {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--sw-accent);
+  font-weight: 600;
+}
+.ib-head .for-svc {
+  font-size: 11px;
+  color: var(--sw-fg-3);
+}
+.ib-head .for-svc b {
+  color: var(--sw-fg-1);
+  font-weight: 500;
+  font-family: var(--sw-mono);
+}
+.ib-head .count {
+  font-family: var(--sw-mono);
+  font-size: 10px;
+  padding: 1px 6px;
+  margin-left: 6px;
+  background: var(--sw-bg-2);
+  color: var(--sw-fg-2);
+  border-radius: 3px;
+}
+.ib-head .hint {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--sw-fg-3);
+}
+.empty.inline {
+  padding: 18px;
+  font-size: 11px;
+}
+.ib-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+.ib-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  padding: 2px 10px;
+  border-bottom: 1px solid var(--sw-line);
+}
+.ib-row:last-child { border-bottom: none; }
+.ib-row.on {
+  background: var(--sw-accent-soft);
+}
+.ib-pick-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--sw-fg-1);
+  font: inherit;
+  font-family: var(--sw-mono);
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.ib-pick-btn:hover {
+  background: var(--sw-bg-2);
+  color: var(--sw-fg-0);
+}
+.ib-row.on .ib-pick-btn {
+  color: var(--sw-accent-2);
+  font-weight: 600;
+  background: transparent;
+}
+.ib-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ib-lang {
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--sw-bg-3);
+  color: var(--sw-fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ib-row.on .ib-lang {
+  background: var(--sw-accent-line);
+  color: var(--sw-accent-2);
+}
+.ib-expand {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: var(--sw-fg-3);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.ib-expand:hover {
+  background: var(--sw-bg-2);
+  color: var(--sw-fg-1);
+}
+.ib-expand .caret {
+  display: inline-block;
+  width: 9px;
+  transition: transform 0.12s;
+  font-size: 9px;
+}
+.ib-expand .caret.open {
+  transform: rotate(90deg);
+}
+.ib-attrs {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 4px 8px 6px 18px;
+  padding: 6px 10px;
+  background: var(--sw-bg-2);
+  border-radius: 4px;
+  font-size: 10.5px;
+}
+.ib-attrs dt {
+  color: var(--sw-fg-3);
+  font-family: var(--sw-mono);
+}
+.ib-attrs dd {
+  margin: 0;
+  color: var(--sw-fg-1);
+  font-family: var(--sw-mono);
+  word-break: break-all;
+}
+
+/* Endpoint picker controls — search box + top-N limit selector,
+ * laid out as a row above the endpoint list. */
+.ep-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 8px;
+  border-bottom: 1px solid var(--sw-line);
+}
+.ep-search {
+  flex: 1;
+  height: 26px;
+  padding: 0 8px;
+  background: var(--sw-bg-2);
+  border: 1px solid var(--sw-line-2);
+  border-radius: 4px;
+  color: var(--sw-fg-0);
+  font: inherit;
+  font-size: 11.5px;
+}
+.ep-search:focus {
+  outline: none;
+  border-color: var(--sw-accent-line);
+}
+.ep-limit {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--sw-fg-3);
+}
+.ep-limit select {
+  height: 26px;
+  padding: 0 6px;
+  background: var(--sw-bg-2);
+  border: 1px solid var(--sw-line-2);
+  border-radius: 4px;
+  color: var(--sw-fg-0);
+  font: inherit;
+  font-size: 11.5px;
+}
+.ep-active-query {
+  padding: 4px 12px;
+  font-size: 10.5px;
+  color: var(--sw-fg-3);
+  border-bottom: 1px dashed var(--sw-line);
+}
+.ep-active-query code {
+  font-family: var(--sw-mono);
+  font-size: 10.5px;
+  color: var(--sw-accent-2);
+  padding: 0 4px;
+  background: var(--sw-accent-soft);
+  border-radius: 2px;
+}
 .grid {
   /* 12-col flow grid with fixed row height. `grid-auto-flow: dense`
    * back-fills gaps so a span-12 widget after several span-4s doesn't
@@ -326,17 +839,32 @@ function isVisible(
   flex: 0 0 auto;
 }
 .w-body {
+  /* Column-flex so charts / lists / records can flex: 1 and claim the
+   * full widget height. Card-type widgets opt into centering via the
+   * `.type-card` modifier (single scalar number reads better when
+   * vertically centered). */
   flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
   padding: 8px 12px;
   min-height: 0;
   overflow: hidden;
 }
+.w-body.type-card {
+  align-items: center;
+  justify-content: center;
+}
 .w-body :deep(.top-list) {
-  align-self: stretch;
-  justify-self: stretch;
+  flex: 1;
+  min-height: 0;
+}
+.w-body :deep(.top-list .rows) {
+  /* Inside TopList, the .rows wrapper already has `flex: 1` + scroll —
+   * but it needs an explicit `min-height: 0` so the rows region can
+   * shrink past its intrinsic content height when the widget is
+   * shorter than the data. Without this, a 3-row-span widget renders
+   * all 10 rows uncropped and the chrome distorts. */
+  min-height: 0;
 }
 .card-value {
   display: flex;

@@ -94,6 +94,7 @@ const aggSchema = z.enum(['sum', 'avg']);
 const columnSchema = z.object({
   metric: z.string().min(1),
   label: z.string().min(1),
+  tip: z.string().optional(),
   unit: z.string().optional(),
   mqe: z.string().optional(),
   aggregation: aggSchema.optional(),
@@ -112,7 +113,11 @@ const throughputSchema = z.object({
 const bodySchema = z.object({
   topN: z.number().int().min(1).max(8),
   orderBy: z.string().min(1),
-  columns: z.array(columnSchema).max(5),
+  // Bumped from 5 to 10: Overview tile metrics are now self-contained
+  // and threaded as synthetic columns in the same query as the
+  // per-layer header columns. Up to 3 + 5 = 8 in the worst case; 10
+  // gives headroom without making the BFF wide-open.
+  columns: z.array(columnSchema).max(10),
   spark: z
     .object({ metric: z.string().min(1), height: z.number().int().positive() })
     .optional(),
