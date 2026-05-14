@@ -23,10 +23,10 @@ WORKDIR /workspace
 # argon2 (password hashing) builds a native module; alpine needs python + a
 # C toolchain at build time. The deps are dropped from the runtime stage.
 RUN apk add --no-cache python3 make g++ libc6-compat
-# corepack reads `packageManager` from package.json — no need to pin the
-# pnpm version here. Adding `--activate` so the binary is in PATH for
-# subsequent layers.
-RUN corepack enable && corepack prepare --activate
+# Activate the pnpm version pinned in the repo's root `package.json`.
+# We pin it here too so `corepack prepare` doesn't need package.json
+# on disk yet (it runs before the COPY of workspace manifests).
+RUN corepack enable && corepack prepare pnpm@10.33.2 --activate
 
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY apps/bff/package.json apps/bff/
