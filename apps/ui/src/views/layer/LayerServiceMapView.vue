@@ -126,7 +126,37 @@ const cfg = computed(() => data.value?.config ?? {
 function pickByRole(defs: TopologyMetricDef[], role: TopologyMetricDef['role']): TopologyMetricDef | null {
   return defs.find((d) => d.role === role) ?? null;
 }
-const ringDef = computed(() => pickByRole(cfg.value.nodeMetrics, 'ring'));
+/**
+ * Per-user threshold overrides take precedence over the template's
+ * defaults. The setup store keys them by `<scope>.<metricId>`. We
+ * patch the `thresholds` block on a copy of the metric def before
+ * any threshold-driven colour band is computed.
+ */
+const setupCfg = computed(() => store.ensure(layerKey.value, {
+  slots: safeLayer.value.slots,
+  caps: safeLayer.value.caps,
+  metrics: safeLayer.value.metrics,
+  overview: safeLayer.value.overview,
+}));
+function mergeThresholdOverride(def: TopologyMetricDef, scope: 'topology' | 'dependency'): TopologyMetricDef {
+  const ov = setupCfg.value.landing.thresholdOverrides?.[`${scope}.${def.id}`];
+  if (!ov) return def;
+  return {
+    ...def,
+    thresholds: {
+      ...(def.thresholds ?? {}),
+      ...(ov.ok !== undefined ? { ok: ov.ok } : {}),
+      ...(ov.warn !== undefined ? { warn: ov.warn } : {}),
+      ...(ov.danger !== undefined ? { danger: ov.danger } : {}),
+      ...(ov.invertHealth !== undefined ? { invertHealth: ov.invertHealth } : {}),
+      ...(ov.invertBase !== undefined ? { invertBase: ov.invertBase } : {}),
+    },
+  };
+}
+const ringDef = computed(() => {
+  const def = pickByRole(cfg.value.nodeMetrics, 'ring');
+  return def ? mergeThresholdOverride(def, 'topology') : null;
+});
 const centerDef = computed(() => pickByRole(cfg.value.nodeMetrics, 'center'));
 const secondaryDef = computed(() => pickByRole(cfg.value.nodeMetrics, 'secondary'));
 const lineServerDef = computed(() => pickByRole(cfg.value.linkServerMetrics ?? [], 'lineServer'));
@@ -156,6 +186,45 @@ function edgeSeries(
   if (!def) return [];
   const bucket = side === 'server' ? c.serverMetricSeries : c.clientMetricSeries;
   return bucket?.[def.id] ?? [];
+}
+function seriesAt(arr: Array<number | null>, idx: number): number | null {
+  if (idx < 0 || idx >= arr.length) return null;
+  return arr[idx];
+}
+
+// ── Synced crosshair across the client + server sparklines of one
+// edge-metric row. Hovering either chart drives a hairline + dot on
+// BOTH charts; a small tooltip surfaces the per-bucket values plus
+// the client/server diff so the operator can read the comparison
+// without doing the maths in their head. Single-row scope: only one
+// row can be hovered at a time. -------------------------------------
+const hoveredEdgeRowId = ref<string | null>(null);
+const hoveredEdgeBucket = ref<number | null>(null);
+function onEdgeBucketHover(rowId: string, bucket: number): void {
+  hoveredEdgeRowId.value = rowId;
+  hoveredEdgeBucket.value = bucket;
+}
+function onEdgeBucketLeave(): void {
+  hoveredEdgeRowId.value = null;
+  hoveredEdgeBucket.value = null;
+}
+function rowCrosshair(rowId: string): number | null {
+  return hoveredEdgeRowId.value === rowId ? hoveredEdgeBucket.value : null;
+}
+function diffAt(row: EdgeRow, bucket: number | null): number | null {
+  if (bucket === null || !row.clientDef || !row.serverDef || !selectedCall.value) return null;
+  const c = seriesAt(edgeSeries(selectedCall.value, 'client', row.clientDef), bucket);
+  const s = seriesAt(edgeSeries(selectedCall.value, 'server', row.serverDef), bucket);
+  if (c === null || s === null) return null;
+  return s - c;
+}
+function diffColor(d: number | null): string {
+  if (d === null || Math.abs(d) < 0.001) return 'var(--sw-fg-3)';
+  return d > 0 ? 'var(--sw-warn)' : 'var(--sw-ok)';
+}
+function diffText(d: number | null): string {
+  if (d === null) return '—';
+  return (d >= 0 ? '+' : '') + fmtMetric(d);
 }
 
 // ── Layered layout (BFS depth from entry points).
@@ -322,16 +391,36 @@ const layerColumns = computed<LayerColumn[]>(() => {
 });
 
 // ── SVG layout math (circles).
-const NODE_R = 42;
-// Layout spacing — node circle (R*2) + halo + label/metric room.
-// Larger ROW_GAP than before so the dashed selection halo at r=56
-// doesn't bump into the neighbouring row.
+/**
+ * Node geometry — radius drives the cube/icon size and the column
+ * spacing. Sized smaller than the design's r=42 so a chain reads
+ * comfortably on a 12" laptop without horizontal scroll; metrics
+ * text sits beneath the node with a larger size to compensate.
+ */
+const NODE_R = 32;
 const COL_GAP = 240;
 const ROW_GAP = NODE_R * 2 + 90;
 const W = computed(() => Math.max(820, layerColumns.value.length * COL_GAP + 80));
 const H = computed(() => {
   const maxNodes = Math.max(1, ...layerColumns.value.map((c) => c.visible.length));
   return 90 + maxNodes * ROW_GAP + 40;
+});
+
+/**
+ * Card height adapts to the graph's actual size with a 60% floor of
+ * the operator-friendly minimum, capped above to keep the screen
+ * tidy on huge graphs. The floor is 60% of `780px` so a 1-row chain
+ * doesn't shrink to a sliver, while a 4-row fan-out gets the full
+ * `780px+` envelope automatically.
+ */
+const CARD_BASELINE = 780;
+const CARD_MIN = Math.round(CARD_BASELINE * 0.6); // 468px
+const CARD_MAX = 1100;
+const cardHeightPx = computed<number>(() => {
+  // Add chrome (toolbar header, the inner 90+40 already inside H,
+  // small margin). The SVG content dictates the rest.
+  const ideal = H.value + 80;
+  return Math.max(CARD_MIN, Math.min(CARD_MAX, ideal));
 });
 interface Pos { cx: number; cy: number }
 const nodePos = computed<Map<string, Pos>>(() => {
@@ -353,15 +442,31 @@ const elidedTotal = computed(() =>
   layerColumns.value.reduce((acc, c) => acc + c.hidden, 0),
 );
 
-// ── Ring colour band. Maps the ringDef metric value to an ok/warn/err
-// band; for SLA (0..100, higher is healthier) we invert, otherwise we
-// treat higher as worse. The mapping is intentionally simple — a more
-// elaborate threshold config can live on the metric def later.
+/**
+ * Resolve the 4-band colour for a node from the ring-metric value.
+ * Operator-configured thresholds (in the metric def's `thresholds`
+ * block) win when present; otherwise falls back to the historical
+ * heuristic (error % at 0.1 / 1 / 5).
+ */
+function bandColor(value: number, t: NonNullable<TopologyMetricDef['thresholds']>): string {
+  const invertBase = t.invertBase ?? 100;
+  const v = t.invertHealth ? Math.max(0, invertBase - value) : value;
+  const ok = t.ok ?? 0.1;
+  const warn = t.warn ?? 1;
+  const danger = t.danger ?? 5;
+  if (v > danger) return 'var(--sw-err)';
+  if (v > warn) return 'var(--sw-warn)';
+  if (v > ok) return '#fbbf24';
+  return 'var(--sw-ok)';
+}
 function ringColor(n: TopologyNode): string {
   const def = ringDef.value;
   if (!def) return 'var(--sw-line-2)';
   const v = nodeVal(n, def);
   if (v === null) return 'var(--sw-fg-3)';
+  if (def.thresholds) return bandColor(v, def.thresholds);
+  // Legacy heuristic — for "higher is healthier" metrics (SLA /
+  // apdex / success rate) we invert; otherwise treat higher as worse.
   const isHealthHigh = /sla|success|apdex/i.test(def.id) || /sla|apdex|success/i.test(def.label);
   const errPct = isHealthHigh ? Math.max(0, 100 - v) : v;
   if (errPct > 5) return 'var(--sw-err)';
@@ -719,6 +824,20 @@ watch(
   },
 );
 
+/**
+ * Render a metric label for the edge-panel card. Suppresses the unit
+ * suffix when the operator-set label and unit are the same word
+ * (e.g. label="RPM", unit="rpm" → just "RPM" instead of "RPM (RPM)").
+ * Units are always rendered UPPERCASE per the design rule.
+ */
+function formatRowLabel(row: { label: string; unit?: string | null }): string {
+  const lab = (row.label ?? '').trim();
+  const u = (row.unit ?? '').trim();
+  if (!u) return lab;
+  if (lab.toLowerCase() === u.toLowerCase()) return lab.toUpperCase();
+  return `${lab} (${u.toUpperCase()})`;
+}
+
 function fmtWithUnit(v: number | null | undefined, unit: string | undefined): string {
   if (v === null || v === undefined) return '—';
   const s = fmtMetric(v);
@@ -753,7 +872,7 @@ function fmtWithUnit(v: number | null | undefined, unit: string | undefined): st
       {{ errorText ?? 'Topology feed failed — check the BFF and OAP.' }}
     </div>
 
-    <section class="sm-card sw-card">
+    <section class="sm-card sw-card" :style="{ height: cardHeightPx + 'px' }">
       <div ref="containerEl" class="sm-graph">
         <!-- Single SVG that fills the container; pan/zoom transforms
              apply to the inner `<g class="zoom-layer">`. No scroll
@@ -812,9 +931,9 @@ function fmtWithUnit(v: number | null | undefined, unit: string | undefined): st
               <path
                 :d="callPathD(c)"
                 fill="none"
-                :stroke="selectedCallId === c.id ? 'var(--sw-accent-2)' : heaviestEdges.has(c.id) ? 'var(--sw-accent)' : 'var(--sw-line-3)'"
-                :stroke-width="selectedCallId === c.id ? 3 : heaviestEdges.has(c.id) ? 2.6 : 1.2"
-                :opacity="selectedCallId === c.id ? 1 : heaviestEdges.has(c.id) ? 0.95 : 0.45"
+                :stroke="selectedCallId === c.id ? 'var(--sw-accent-2)' : 'var(--sw-accent)'"
+                :stroke-width="selectedCallId === c.id ? 3.4 : heaviestEdges.has(c.id) ? 2.8 : 1.4"
+                :opacity="selectedCallId === c.id ? 1 : heaviestEdges.has(c.id) ? 0.95 : 0.6"
                 stroke-linecap="round"
                 style="pointer-events: none"
               />
@@ -845,31 +964,44 @@ function fmtWithUnit(v: number | null | undefined, unit: string | undefined): st
                    line). The chip shows the configured line metric
                    value + unit; `(C)` marker when only client-side
                    data was available. -->
+              <!-- Edge metric chip — bigger + higher-contrast text so
+                   the unit reads even on dense lines. Units are
+                   always displayed UPPERCASE. -->
               <template v-if="edgeLabel(c) && edgeMidpoint(c)">
                 <g
-                  :transform="`translate(${edgeMidpoint(c)!.x - 30}, ${edgeMidpoint(c)!.y - 9})`"
+                  :transform="`translate(${edgeMidpoint(c)!.x - 38}, ${edgeMidpoint(c)!.y - 11})`"
                   style="pointer-events: none"
                 >
                   <rect
                     x="0"
                     y="0"
-                    width="60"
-                    height="16"
-                    rx="8"
+                    width="76"
+                    height="20"
+                    rx="10"
                     fill="var(--sw-bg-1)"
                     :stroke="selectedCallId === c.id ? 'var(--sw-accent-2)' : heaviestEdges.has(c.id) ? 'var(--sw-accent)' : 'var(--sw-line-2)'"
                     :stroke-width="selectedCallId === c.id ? 1.4 : 1"
                   />
                   <text
-                    x="30"
-                    y="11"
+                    x="38"
+                    y="14"
                     text-anchor="middle"
-                    :fill="selectedCallId === c.id ? 'var(--sw-accent-2)' : heaviestEdges.has(c.id) ? 'var(--sw-accent-2)' : 'var(--sw-fg-2)'"
-                    font-size="9"
+                    :fill="selectedCallId === c.id ? 'var(--sw-accent-2)' : heaviestEdges.has(c.id) ? 'var(--sw-accent-2)' : 'var(--sw-fg-1)'"
+                    font-size="11"
                     font-family="var(--sw-mono)"
                     font-weight="700"
                   >
-                    {{ fmtMetric(edgeLabel(c)!.value) }}<tspan v-if="edgeLabel(c)!.unit" :dx="2" fill="var(--sw-fg-3)" font-weight="500">{{ edgeLabel(c)!.unit }}</tspan><tspan v-if="edgeLabel(c)!.isClient" :dx="2" fill="var(--sw-fg-3)">·C</tspan>
+                    {{ fmtMetric(edgeLabel(c)!.value) }}<tspan
+                      v-if="edgeLabel(c)!.unit"
+                      :dx="3"
+                      fill="var(--sw-fg-2)"
+                      font-weight="600"
+                    >{{ edgeLabel(c)!.unit.toUpperCase() }}</tspan><tspan
+                      v-if="edgeLabel(c)!.isClient"
+                      :dx="3"
+                      fill="var(--sw-fg-3)"
+                      font-weight="600"
+                    >·C</tspan>
                   </text>
                 </g>
               </template>
@@ -988,10 +1120,12 @@ function fmtWithUnit(v: number | null | undefined, unit: string | undefined): st
                 <animate attributeName="opacity" values="1;0.2;1" dur="2s" repeatCount="indefinite" />
               </circle>
 
-              <!-- Name below the node. -->
+              <!-- Name below the node. Slightly larger now that the
+                   circle radius is smaller — keeps the label as the
+                   readable anchor for the node. -->
               <text
                 text-anchor="middle"
-                y="64"
+                y="58"
                 :fill="selectedNodeId === n.id ? 'var(--sw-fg-0)' : 'var(--sw-fg-1)'"
                 font-size="13"
                 font-family="var(--sw-mono)"
@@ -1000,22 +1134,24 @@ function fmtWithUnit(v: number | null | undefined, unit: string | undefined): st
                 {{ n.name.length > 22 ? n.name.slice(0, 20) + '…' : n.name }}
               </text>
               <!-- Metric line. Operator-configured `center` metric
-                   in the ring colour; `secondary` next to it muted. -->
+                   in the ring colour; `secondary` next to it muted.
+                   Units always UPPERCASE per design rule. Bumped
+                   font size since the node radius shrunk. -->
               <text
                 text-anchor="middle"
-                y="80"
+                y="76"
                 :fill="centerDef && nodeVal(n, centerDef) !== null ? ringColor(n) : 'var(--sw-fg-3)'"
-                font-size="11"
+                font-size="12"
                 font-family="var(--sw-mono)"
-                font-weight="600"
+                font-weight="700"
               >
                 {{
                   centerDef
                     ? (nodeVal(n, centerDef) === null
-                        ? `— ${centerDef.unit ?? ''}`
-                        : `${fmtMetric(nodeVal(n, centerDef))}${centerDef.unit ? ' ' + centerDef.unit : ''}`)
+                        ? `— ${(centerDef.unit ?? '').toUpperCase()}`
+                        : `${fmtMetric(nodeVal(n, centerDef))}${centerDef.unit ? ' ' + centerDef.unit.toUpperCase() : ''}`)
                     : ''
-                }}<template v-if="secondaryDef && nodeVal(n, secondaryDef) !== null"><tspan fill="var(--sw-fg-3)"> · </tspan><tspan fill="var(--sw-fg-2)">{{ secondaryDef.label.toLowerCase() }} {{ fmtMetric(nodeVal(n, secondaryDef)) }}{{ secondaryDef.unit ? ' ' + secondaryDef.unit : '' }}</tspan></template>
+                }}<template v-if="secondaryDef && nodeVal(n, secondaryDef) !== null"><tspan fill="var(--sw-fg-3)"> · </tspan><tspan fill="var(--sw-fg-2)" font-weight="500">{{ secondaryDef.label }} {{ fmtMetric(nodeVal(n, secondaryDef)) }}{{ secondaryDef.unit ? ' ' + secondaryDef.unit.toUpperCase() : '' }}</tspan></template>
               </text>
             </g>
           </g>
@@ -1048,9 +1184,9 @@ function fmtWithUnit(v: number | null | undefined, unit: string | undefined): st
           <div class="lg-rule" />
           <div class="lg-row">
             <span class="lg-swatch" style="background: var(--sw-accent)" />
-            <span>Heaviest path</span>
+            <span>Calls</span>
             <span class="lg-aside">
-              ({{ lineServerDef?.label ?? '' }}{{ lineServerDef && lineClientDef ? ' → ' + lineClientDef.label : '' }})
+              thicker = heaviest (by {{ lineServerDef?.label ?? 'server' }}<template v-if="lineClientDef"> · falls back to {{ lineClientDef.label }}</template>)
             </span>
           </div>
         </div>
@@ -1081,7 +1217,7 @@ function fmtWithUnit(v: number | null | undefined, unit: string | undefined): st
         </header>
         <div class="sp-kpis">
           <div v-for="m in cfg.nodeMetrics" :key="m.id" class="sp-kpi">
-            <div class="sp-kpi-label">{{ m.label }}<span v-if="m.unit"> ({{ m.unit }})</span></div>
+            <div class="sp-kpi-label">{{ formatRowLabel(m) }}</div>
             <div class="sp-kpi-value" :style="{ color: m.role === 'ring' ? ringColor(selectedNode) : m.role === 'center' ? 'var(--sw-accent)' : 'var(--sw-fg-0)' }">
               {{ fmtMetric(nodeVal(selectedNode, m)) }}
             </div>
@@ -1138,21 +1274,41 @@ function fmtWithUnit(v: number | null | undefined, unit: string | undefined): st
           </div>
           <button class="sw-btn small" type="button" @click="selectedCallId = null">×</button>
         </header>
-        <!-- Edge line metrics — one row per metric. Each row shows
-             two sparklines side-by-side: client on the left, server
-             on the right. Both share the metric's label/unit at the
-             top of the row so the eye reads label → client trend →
-             server trend across a single horizontal band.
-             Single-side rows render only that side full-width;
-             "no value" appears when both sides are configured but
-             returned null. -->
+        <!-- Edge line metrics — one card per metric. Inside, client
+             and server cells sit SIDE-BY-SIDE (left | right) and each
+             sparkline stretches via `fluid` to fill its cell. Single-
+             side metrics span the full row; "no value" appears only
+             when neither side has data. -->
         <div class="sp-section">
           <div class="sp-section-title">Line metrics</div>
           <div v-if="edgeRows.length > 0" class="sp-edge-rows">
             <div v-for="row in edgeRows" :key="row.id" class="sp-edge-row-card">
               <div class="sp-edge-row-head">
-                <span class="sp-edge-row-label">
-                  {{ row.label }}<span v-if="row.unit" class="unit"> ({{ row.unit }})</span>
+                <span class="sp-edge-row-label">{{ formatRowLabel(row) }}</span>
+                <!-- Hover tooltip — at-bucket values + diff. Surfaced
+                     inline at the top-right of the row so it
+                     doesn't overflow the sidebar. -->
+                <span
+                  v-if="hoveredEdgeRowId === row.id && hoveredEdgeBucket !== null"
+                  class="sp-edge-tip"
+                >
+                  <template v-if="row.clientDef">
+                    <span class="tip-tag" style="color: var(--sw-info)">C</span>
+                    <span class="tip-val">{{ fmtMetric(seriesAt(edgeSeries(selectedCall, 'client', row.clientDef), hoveredEdgeBucket)) }}</span>
+                  </template>
+                  <template v-if="row.serverDef">
+                    <span class="tip-sep">·</span>
+                    <span class="tip-tag" style="color: var(--sw-accent)">S</span>
+                    <span class="tip-val">{{ fmtMetric(seriesAt(edgeSeries(selectedCall, 'server', row.serverDef), hoveredEdgeBucket)) }}</span>
+                  </template>
+                  <template v-if="row.clientDef && row.serverDef">
+                    <span class="tip-sep">·</span>
+                    <span class="tip-tag">Δ</span>
+                    <span
+                      class="tip-val"
+                      :style="{ color: diffColor(diffAt(row, hoveredEdgeBucket)) }"
+                    >{{ diffText(diffAt(row, hoveredEdgeBucket)) }}</span>
+                  </template>
                 </span>
               </div>
               <template v-if="edgeRowValues(selectedCall, row).kind === 'both'">
@@ -1165,8 +1321,12 @@ function fmtWithUnit(v: number | null | undefined, unit: string | undefined): st
                     <Sparkline
                       :values="edgeSeries(selectedCall, 'client', row.clientDef)"
                       color="var(--sw-info)"
-                      :height="38"
+                      :height="36"
                       :stroke="1.4"
+                      fluid
+                      :crosshair-bucket="rowCrosshair(row.id)"
+                      @bucket-hover="(b: number) => onEdgeBucketHover(row.id, b)"
+                      @bucket-leave="onEdgeBucketLeave"
                     />
                   </div>
                   <div class="sp-edge-cell">
@@ -1177,8 +1337,12 @@ function fmtWithUnit(v: number | null | undefined, unit: string | undefined): st
                     <Sparkline
                       :values="edgeSeries(selectedCall, 'server', row.serverDef)"
                       color="var(--sw-accent)"
-                      :height="38"
+                      :height="36"
                       :stroke="1.4"
+                      fluid
+                      :crosshair-bucket="rowCrosshair(row.id)"
+                      @bucket-hover="(b: number) => onEdgeBucketHover(row.id, b)"
+                      @bucket-leave="onEdgeBucketLeave"
                     />
                   </div>
                 </div>
@@ -1193,8 +1357,12 @@ function fmtWithUnit(v: number | null | undefined, unit: string | undefined): st
                   <Sparkline
                     :values="edgeSeries(selectedCall, 'client', row.clientDef)"
                     color="var(--sw-info)"
-                    :height="38"
+                    :height="36"
                     :stroke="1.4"
+                    fluid
+                    :crosshair-bucket="rowCrosshair(row.id)"
+                    @bucket-hover="(b: number) => onEdgeBucketHover(row.id, b)"
+                    @bucket-leave="onEdgeBucketLeave"
                   />
                 </div>
               </template>
@@ -1208,8 +1376,12 @@ function fmtWithUnit(v: number | null | undefined, unit: string | undefined): st
                   <Sparkline
                     :values="edgeSeries(selectedCall, 'server', row.serverDef)"
                     color="var(--sw-accent)"
-                    :height="38"
+                    :height="36"
                     :stroke="1.4"
+                    fluid
+                    :crosshair-bucket="rowCrosshair(row.id)"
+                    @bucket-hover="(b: number) => onEdgeBucketHover(row.id, b)"
+                    @bucket-leave="onEdgeBucketLeave"
                   />
                 </div>
               </template>
@@ -1303,23 +1475,28 @@ function fmtWithUnit(v: number | null | undefined, unit: string | undefined): st
 }
 .sm-card {
   /* Map card — graph on the left, dual-stack sidebar on the right.
-     Node panel on top, edge panel underneath; both visible at the
-     same time so the operator can read service KPIs against the
-     in-flight call's line-chart trends in one glance. */
+     Height is driven by the `cardHeightPx` computed in the script:
+     adapts to the graph's actual content with a 60% floor of the
+     780px baseline and a 1100px cap. See `cardHeightPx` for the
+     reasoning; the inline `style="height: …px"` on the section
+     wins over this declaration. */
   padding: 0;
   overflow: hidden;
-  height: 720px;
   display: grid;
   grid-template-columns: 1fr 360px;
 }
 .sm-panels {
+  /* The whole sidebar is one scroll container. Each panel sizes to
+     its content (upstream / downstream lists are dynamic, so a
+     fixed 50/50 split makes one panel too tall and the other too
+     short). When total content exceeds the card height, the box
+     scrolls as a single unit so the operator never has to chase a
+     scrollbar inside a sub-panel. */
   border-left: 1px solid var(--sw-line);
   background: var(--sw-bg-1);
-  display: grid;
-  /* Two equal rows so the node + edge panels each get a stable
-     viewport — line charts inside the edge panel need predictable
-     vertical space to read. */
-  grid-template-rows: 1fr 1fr;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
   min-height: 0;
 }
 .sm-panel {
@@ -1327,8 +1504,10 @@ function fmtWithUnit(v: number | null | undefined, unit: string | undefined): st
   display: flex;
   flex-direction: column;
   min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
+  /* Content-driven height. `flex-shrink: 0` so the panels keep their
+     natural size; overflow is handled by the parent scroll. */
+  flex: 0 0 auto;
+  overflow: visible;
 }
 .sm-panel + .sm-panel {
   border-top: 1px solid var(--sw-line);
@@ -1342,6 +1521,10 @@ function fmtWithUnit(v: number | null | undefined, unit: string | undefined): st
   font-size: 11.5px;
   display: grid;
   place-items: center;
+  /* Empty prompts stay compact so they don't push the populated
+     panel out of view. */
+  min-height: 64px;
+  flex: 0 0 auto;
 }
 .sm-graph {
   /* Fill the card — the parent `.sm-card` is `display: flex` since the
@@ -1428,6 +1611,33 @@ function fmtWithUnit(v: number | null | undefined, unit: string | undefined): st
   border-radius: 4px;
   padding: 6px 8px;
 }
+/* Crosshair hover tooltip (per edge-metric row). Compact inline
+   chip at the right side of the row head showing the value at the
+   hovered bucket on each side plus the diff (Δ = server − client). */
+.sp-edge-tip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-left: auto;
+  font-family: var(--sw-mono);
+  font-size: 10.5px;
+  padding: 1px 6px;
+  background: var(--sw-bg-0);
+  border: 1px solid var(--sw-line);
+  border-radius: 4px;
+}
+.sp-edge-tip .tip-tag {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.sp-edge-tip .tip-val {
+  color: var(--sw-fg-0);
+  font-weight: 600;
+}
+.sp-edge-tip .tip-sep {
+  color: var(--sw-fg-3);
+}
 .sp-edge-row-head {
   display: flex;
   align-items: baseline;
@@ -1455,6 +1665,14 @@ function fmtWithUnit(v: number | null | undefined, unit: string | undefined): st
   border: 1px solid var(--sw-line);
   border-radius: 3px;
   padding: 4px 6px;
+  min-width: 0;
+}
+/* Inside an edge cell the Sparkline should fill the cell — the
+   `fluid` prop on the component sets svg width=100% but the parent
+   must allow shrinking, hence `min-width: 0` above. */
+.sp-edge-cell :deep(.sparkline) {
+  display: block;
+  width: 100%;
 }
 .sp-edge-cell-head {
   display: flex;
@@ -1540,6 +1758,38 @@ function fmtWithUnit(v: number | null | undefined, unit: string | undefined): st
 }
 .lg-swatch { width: 18px; height: 3px; border-radius: 1px; display: block; }
 .lg-aside { color: var(--sw-fg-3); font-size: 9.5px; }
+.lg-swatch-other { background: var(--sw-line-3); }
+/* Floating zoom + fit controls at the top-right of the map area.
+   Absolute-positioned over the SVG so they ride above any node /
+   edge without taking layout space. */
+.sm-zoom-ctrls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: rgba(15, 19, 26, 0.92);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--sw-line);
+  border-radius: 6px;
+  z-index: 4;
+}
+.sm-zoom-ctrls .sw-btn.small {
+  height: 22px;
+  min-width: 26px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+.sm-zoom-pct {
+  font-family: var(--sw-mono);
+  font-size: 10.5px;
+  color: var(--sw-fg-3);
+  padding-left: 4px;
+  min-width: 38px;
+  text-align: right;
+}
 .cap-chip {
   position: absolute;
   right: 12px;

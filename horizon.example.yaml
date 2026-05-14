@@ -26,6 +26,13 @@ oap:
   # OAP query/status host (port 12800 by default; GraphQL + /status/*).
   statusUrl: http://127.0.0.1:12800
   timeoutMs: 15000
+  # Optional basic-auth credentials for outbound OAP calls (GraphQL,
+  # /status, Zipkin /api/v2/*). The public demo at
+  # `demo.skywalking.apache.org` gates traffic behind
+  # skywalking:skywalking — set both fields below to use it.
+  # auth:
+  #   username: skywalking
+  #   password: skywalking
 
 auth:
   backend: local

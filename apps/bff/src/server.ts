@@ -15,8 +15,11 @@
  * limitations under the License.
  */
 
+import { existsSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
+import fastifyStatic from '@fastify/static';
 import { AuditLogger } from './audit/logger.js';
 import { registerAuthRoutes } from './auth/routes.js';
 import { SessionStore } from './auth/sessions.js';
@@ -27,10 +30,14 @@ import { registerEndpointDependencyRoute } from './oap/endpoint-dependency-route
 import { registerOapInfoRoute } from './oap/info-routes.js';
 import { registerInstanceRoute } from './oap/instance-routes.js';
 import { registerLandingRoute } from './oap/landing-routes.js';
+import { registerLogRoute } from './oap/log-routes.js';
 import { registerMenuRoute } from './oap/menu-routes.js';
 import { registerOapRoutes } from './oap/routes.js';
 import { registerPreflightRoutes } from './oap/preflight-routes.js';
 import { registerTopologyRoute } from './oap/topology-routes.js';
+import { registerTraceRoutes } from './oap/trace-routes.js';
+import { registerTraceTagRoutes } from './oap/trace-tag-routes.js';
+import { registerOverviewRoutes } from './overview/routes.js';
 import { registerSetupRoutes } from './setup/routes.js';
 import { SetupStore } from './setup/store.js';
 import { HttpError } from './errors.js';
@@ -72,10 +79,34 @@ registerInstanceRoute(app, { config: source, sessions });
 registerEndpointRoute(app, { config: source, sessions });
 registerTopologyRoute(app, { config: source, sessions });
 registerEndpointDependencyRoute(app, { config: source, sessions });
+registerTraceRoutes(app, { config: source, sessions });
+registerTraceTagRoutes(app, { config: source, sessions });
+registerLogRoute(app, { config: source, sessions });
+registerOverviewRoutes(app, { config: source, sessions });
 registerDashboardRoute(app, { config: source, sessions });
 registerSetupRoutes(app, { config: source, sessions, audit, store: setupStore });
 registerOapRoutes(app, { config: source, sessions, audit });
 registerPreflightRoutes(app, { config: source, sessions });
+
+// Serve the built SPA out of the BFF when HORIZON_STATIC_DIR points at a
+// directory (Docker image layout: /app/static contains the Vite dist).
+// Local dev keeps using the Vite dev-server on :9091 so this is a no-op
+// when the env var is absent.
+const staticDir = process.env.HORIZON_STATIC_DIR
+  ? resolvePath(process.env.HORIZON_STATIC_DIR)
+  : null;
+if (staticDir && existsSync(staticDir)) {
+  await app.register(fastifyStatic, { root: staticDir, prefix: '/', wildcard: false });
+  // SPA fallback — anything that isn't an `/api/*` request and didn't match
+  // a built file falls through to index.html so client-side routing works.
+  app.setNotFoundHandler((req, reply) => {
+    if (req.url.startsWith('/api/')) {
+      return reply.code(404).send({ code: 'not_found', message: req.url });
+    }
+    return reply.sendFile('index.html');
+  });
+  logger.info({ staticDir }, 'serving SPA from static dir');
+}
 
 app.get('/api/health', async () => ({
   status: 'ok',

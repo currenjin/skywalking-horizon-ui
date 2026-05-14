@@ -16,35 +16,9 @@
 -->
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import type { AggregationKind, LayerDef } from '@skywalking-horizon-ui/api-client';
+import type { LayerDef } from '@skywalking-horizon-ui/api-client';
 import Icon from '@/components/icons/Icon.vue';
-import Sparkline from '@/components/charts/Sparkline.vue';
-import { METRICS, metricsForLayer } from '@/composables/metricCatalog';
-import { colorForMetric } from '@/composables/metricColor';
 import { useSetupStore, defaultLandingFor } from '@/stores/setup';
-import { fmtMetric } from '@/utils/formatters';
-
-/** Mirror of the setup-store's defaultAggregationFor — kept inline so the
- *  setup UI seeds new columns with the same defaults the store uses. */
-function defaultAgg(metricKey: string): AggregationKind {
-  const k = metricKey.toLowerCase();
-  if (
-    k === 'cpm' ||
-    k.endsWith('.msg-rate') ||
-    k.endsWith('.qps') ||
-    k.endsWith('.pv') ||
-    k.endsWith('.invocations') ||
-    k.endsWith('.tokens') ||
-    k.endsWith('.req') ||
-    k.endsWith('.slow-queries') ||
-    k.endsWith('.js-err') ||
-    k.endsWith('.cold-start') ||
-    k.endsWith('.restart')
-  ) {
-    return 'sum';
-  }
-  return 'avg';
-}
 
 const props = defineProps<{ layer: LayerDef; expanded?: boolean }>();
 const emit = defineEmits<{ (e: 'toggle'): void }>();
@@ -90,50 +64,6 @@ const capRows: Array<{ key: keyof typeof cfg.value.caps; label: string }> = [
   { key: 'dashboards', label: 'Metrics' },
   { key: 'serviceMap', label: 'Service Map' },
 ];
-
-// Pulled from the shared metric catalog so labels/units/tips stay
-// consistent across the Overview cards and the setup UI.
-const availableColumns = Object.values(METRICS).map((m) => ({
-  metric: m.key,
-  label: m.label,
-  longLabel: m.longLabel,
-  unit: m.unit,
-  tip: m.tip,
-}));
-// Chip groups: layer-relevant metrics first, the rest collapsed below.
-const groupedColumns = computed(() => {
-  const { recommended, other } = metricsForLayer(props.layer.key);
-  const toOpt = (m: typeof recommended[number]) => ({
-    metric: m.key,
-    label: m.label,
-    longLabel: m.longLabel,
-    unit: m.unit,
-    tip: m.tip,
-  });
-  return {
-    recommended: recommended.map(toOpt),
-    other: other.map(toOpt),
-  };
-});
-const showAllChips = ref(false);
-function isColumnSelected(metric: string): boolean {
-  return cfg.value.landing.columns.some((c) => c.metric === metric);
-}
-function toggleColumn(metric: string, label: string, unit?: string): void {
-  const cols = cfg.value.landing.columns;
-  const idx = cols.findIndex((c) => c.metric === metric);
-  if (idx >= 0) {
-    cols.splice(idx, 1);
-  } else if (cols.length < 5) {
-    cols.push({
-      metric,
-      label,
-      ...(unit ? { unit } : {}),
-      aggregation: defaultAgg(metric),
-    });
-  }
-  onEdit();
-}
 
 const showAdvanced = ref(false);
 
@@ -265,76 +195,70 @@ function moveMetricInGroup(gIdx: number, mIdx: number, dir: -1 | 1): void {
   onEdit();
 }
 
-/* ---- Live preview of the Overview tile ----
- * Operators edit the metrics in the table above; the preview tile to
- * the side mirrors the actual `LayerKpiStripCard` rendering using mock
- * values (deterministic per row id) so changes are visible without
- * leaving the page. */
+/* ---- Per-user threshold overrides ----
+ *
+ * The layer template's `topology` / `endpointDependency` block declares
+ * default thresholds for the metric that drives the node-ring colour
+ * band (typically SLA). Operators can override those defaults
+ * per-user without editing the template JSON.
+ *
+ * Stored under `landing.thresholdOverrides`, keyed by
+ * `<scope>.<metricId>` where scope is `topology` or `dependency`.
+ * The renderer merges these on top of the template defaults before
+ * computing the band colour.
+ */
 
-function hashSeed(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return (h >>> 0) || 1;
-}
-function rng(seed: number): () => number {
-  let s = seed >>> 0;
-  return () => {
-    s = (s + 0x6d2b79f5) >>> 0;
-    let t = Math.imul(s ^ (s >>> 15), 1 | s);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-function mockWalk(seedKey: string, points: number, center: number, amp: number): number[] {
-  const rand = rng(hashSeed(seedKey));
-  const out: number[] = [];
-  let v = center;
-  for (let i = 0; i < points; i++) {
-    v += (rand() - 0.5) * amp * 0.4;
-    v += (center - v) * 0.08;
-    out.push(Math.max(0, v));
-  }
-  return out;
-}
-function mockProfile(unit: string | undefined): { center: number; amp: number } {
-  if (unit?.includes('%')) return { center: 95 + Math.random() * 4, amp: 5 };
-  if (unit === 'ms') return { center: 80 + Math.random() * 220, amp: 60 };
-  if (unit === 'rpm' || unit?.includes('/min')) return { center: 1200, amp: 600 };
-  return { center: 100, amp: 40 };
+type OverrideScope = 'topology' | 'dependency';
+interface ThresholdOverrideRow {
+  scope: OverrideScope;
+  metricId: string;
+  ok?: number;
+  warn?: number;
+  danger?: number;
+  invertHealth?: boolean;
+  invertBase?: number;
 }
 
-interface PreviewCell {
-  id: string;
-  label: string;
-  unit?: string;
-  tip?: string;
-  value: number;
-  series: number[];
-  color: string;
+function overridesMap(): NonNullable<typeof cfg.value.landing.thresholdOverrides> {
+  if (!cfg.value.landing.thresholdOverrides) cfg.value.landing.thresholdOverrides = {};
+  return cfg.value.landing.thresholdOverrides;
 }
-
-const previewCells = computed<PreviewCell[]>(() =>
-  overviewCells.value.map((c) => {
-    const { center, amp } = mockProfile(c.unit);
-    return {
-      id: c.metric,
-      label: c.label || c.metric,
-      unit: c.unit,
-      tip: c.tip,
-      value: mockWalk(c.metric + (c.label ?? ''), 1, center, 0)[0],
-      series: mockWalk(c.metric + (c.label ?? ''), 24, center, amp),
-      color: colorForMetric(c.metric),
-    };
-  }),
-);
-
-function clampTopN(n: number): void {
-  const v = Math.max(5, Math.min(8, Math.round(n || 5)));
-  cfg.value.landing.topN = v;
+const thresholdOverrides = computed<ThresholdOverrideRow[]>(() => {
+  const map = cfg.value.landing.thresholdOverrides ?? {};
+  return Object.entries(map).map(([key, v]) => {
+    const dot = key.indexOf('.');
+    const scope = (key.slice(0, dot) as OverrideScope) || 'topology';
+    const metricId = key.slice(dot + 1);
+    return { scope, metricId, ...v };
+  });
+});
+function addOverride(): void {
+  const map = overridesMap();
+  let i = 1;
+  while (map[`topology.metric_${i}`]) i++;
+  map[`topology.metric_${i}`] = { ok: 0.1, warn: 1, danger: 5 };
   onEdit();
+}
+function removeOverride(scope: OverrideScope, metricId: string): void {
+  const map = overridesMap();
+  delete map[`${scope}.${metricId}`];
+  onEdit();
+}
+function updateOverrideKey(oldScope: OverrideScope, oldId: string, newScope: OverrideScope, newId: string): void {
+  if (oldScope === newScope && oldId === newId) return;
+  const map = overridesMap();
+  const oldKey = `${oldScope}.${oldId}`;
+  const newKey = `${newScope}.${newId}`;
+  if (!map[oldKey]) return;
+  map[newKey] = map[oldKey];
+  delete map[oldKey];
+  onEdit();
+}
+function getOverride(scope: OverrideScope, metricId: string): NonNullable<typeof cfg.value.landing.thresholdOverrides>[string] {
+  const map = overridesMap();
+  const k = `${scope}.${metricId}`;
+  if (!map[k]) map[k] = {};
+  return map[k]!;
 }
 
 const headerColor = computed(() => props.layer.color);
@@ -598,6 +522,117 @@ const isDefaultLanding = computed(() => {
             >＋ Add metric</button>
           </div>
         </div>
+      </section>
+
+      <section>
+        <div class="row-with-toggle">
+          <h4>Topology / API-dep threshold overrides</h4>
+          <button
+            class="sw-btn small"
+            type="button"
+            title="Add a per-user override row"
+            @click="addOverride"
+          >＋ Add override</button>
+        </div>
+        <p class="hint subtle">
+          Per-user overrides take precedence over the layer template's default
+          thresholds when computing the node-ring colour band (OK / warn / danger).
+          Scope picks which view — service map (<code>topology</code>) or
+          API dependency (<code>dependency</code>). Metric id matches the layer
+          template (e.g. <code>sla</code>). Toggle "invert" for higher-is-better
+          metrics like SLA / apdex.
+        </p>
+        <div v-if="thresholdOverrides.length === 0" class="hint subtle group-empty">
+          No overrides yet. Click "＋ Add override" to insert a row.
+        </div>
+        <table v-else class="col-editor threshold-table">
+          <thead>
+            <tr>
+              <th>Scope</th>
+              <th>Metric id</th>
+              <th>ok ≤</th>
+              <th>warn ≤</th>
+              <th>danger ≤</th>
+              <th>invert</th>
+              <th>base</th>
+              <th class="row-actions"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in thresholdOverrides" :key="`${row.scope}.${row.metricId}`">
+              <td>
+                <select
+                  class="ctl narrow"
+                  :value="row.scope"
+                  @change="updateOverrideKey(row.scope, row.metricId, ($event.target as HTMLSelectElement).value as OverrideScope, row.metricId)"
+                >
+                  <option value="topology">topology</option>
+                  <option value="dependency">dependency</option>
+                </select>
+              </td>
+              <td>
+                <input
+                  class="ctl mono"
+                  :value="row.metricId"
+                  placeholder="sla"
+                  @change="updateOverrideKey(row.scope, row.metricId, row.scope, ($event.target as HTMLInputElement).value)"
+                />
+              </td>
+              <td>
+                <input
+                  class="ctl narrow"
+                  type="number"
+                  step="0.1"
+                  :value="getOverride(row.scope, row.metricId).ok"
+                  @input="getOverride(row.scope, row.metricId).ok = Number(($event.target as HTMLInputElement).value) || undefined; onEdit()"
+                />
+              </td>
+              <td>
+                <input
+                  class="ctl narrow"
+                  type="number"
+                  step="0.1"
+                  :value="getOverride(row.scope, row.metricId).warn"
+                  @input="getOverride(row.scope, row.metricId).warn = Number(($event.target as HTMLInputElement).value) || undefined; onEdit()"
+                />
+              </td>
+              <td>
+                <input
+                  class="ctl narrow"
+                  type="number"
+                  step="0.1"
+                  :value="getOverride(row.scope, row.metricId).danger"
+                  @input="getOverride(row.scope, row.metricId).danger = Number(($event.target as HTMLInputElement).value) || undefined; onEdit()"
+                />
+              </td>
+              <td>
+                <input
+                  type="checkbox"
+                  :checked="getOverride(row.scope, row.metricId).invertHealth ?? false"
+                  @change="getOverride(row.scope, row.metricId).invertHealth = ($event.target as HTMLInputElement).checked; onEdit()"
+                />
+              </td>
+              <td>
+                <input
+                  class="ctl narrow"
+                  type="number"
+                  step="1"
+                  placeholder="100"
+                  :value="getOverride(row.scope, row.metricId).invertBase"
+                  @input="getOverride(row.scope, row.metricId).invertBase = Number(($event.target as HTMLInputElement).value) || undefined; onEdit()"
+                />
+              </td>
+              <td class="row-actions">
+                <button
+                  class="sw-btn ghost small danger"
+                  type="button"
+                  title="Remove override"
+                  @click="removeOverride(row.scope, row.metricId)"
+                >✕</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </section>
 
       <div class="actions">

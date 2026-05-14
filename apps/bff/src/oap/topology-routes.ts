@@ -45,7 +45,7 @@ import type {
   TopologyResponse,
 } from '@skywalking-horizon-ui/api-client';
 import { requireAuth } from '../auth/middleware.js';
-import { graphqlPost } from './graphql-client.js';
+import {  graphqlPost, buildOapOpts } from './graphql-client.js';
 import { getLayerTemplate, topologyConfigFor } from '../layers/loader.js';
 
 export interface TopologyRouteDeps {
@@ -268,11 +268,7 @@ export function registerTopologyRoute(app: FastifyInstance, deps: TopologyRouteD
       const topoCfg: TopologyConfig = topologyConfigFor(template);
 
       const cfgCurrent = deps.config.current;
-      const opts = {
-        statusUrl: cfgCurrent.oap.statusUrl,
-        timeoutMs: cfgCurrent.oap.timeoutMs,
-        fetch: deps.fetch,
-      };
+      const opts = buildOapOpts(cfgCurrent, deps.fetch);
       const window = defaultWindow();
       const oapLayer = layerKey.toUpperCase();
       const durationVar = { start: window.start, end: window.end, step: 'MINUTE' };

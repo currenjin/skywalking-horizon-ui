@@ -72,31 +72,41 @@ export function buildOapClients(
 ): OapClients {
   const fetch = opts.fetch;
   const primaryUrl = config.oap.adminUrls[0]!;
-  // Single source of truth for per-call timeout — every client
-  // constructed via this factory inherits it. 0 means no timeout
-  // (passed through verbatim to the clients).
   const timeoutMs = config.oap.timeoutMs;
+  // If config.oap.auth is set, every constructed client gets the
+  // basic-auth Authorization header so all upstream calls (status,
+  // runtime-rule, OAL catalog, DSL debug, inspect) authenticate.
+  const headers: Record<string, string> | undefined = config.oap.auth
+    ? {
+        authorization:
+          'Basic ' +
+          Buffer.from(
+            `${config.oap.auth.username}:${config.oap.auth.password}`,
+            'utf8',
+          ).toString('base64'),
+      }
+    : undefined;
   return {
     forUrl(adminUrl: string): RuntimeRuleClient {
-      return new RuntimeRuleClient({ adminUrl, fetch, timeoutMs });
+      return new RuntimeRuleClient({ adminUrl, fetch, timeoutMs, headers });
     },
     primary(): RuntimeRuleClient {
-      return new RuntimeRuleClient({ adminUrl: primaryUrl, fetch, timeoutMs });
+      return new RuntimeRuleClient({ adminUrl: primaryUrl, fetch, timeoutMs, headers });
     },
     status(): StatusClient {
-      return new StatusClient({ statusUrl: config.oap.statusUrl, fetch, timeoutMs });
+      return new StatusClient({ statusUrl: config.oap.statusUrl, fetch, timeoutMs, headers });
     },
     oal(): OalClient {
-      return new OalClient({ adminUrl: primaryUrl, fetch, timeoutMs });
+      return new OalClient({ adminUrl: primaryUrl, fetch, timeoutMs, headers });
     },
     debug(): DslDebuggingClient {
-      return new DslDebuggingClient({ adminUrl: primaryUrl, fetch, timeoutMs });
+      return new DslDebuggingClient({ adminUrl: primaryUrl, fetch, timeoutMs, headers });
     },
     debugForUrl(adminUrl: string): DslDebuggingClient {
-      return new DslDebuggingClient({ adminUrl, fetch, timeoutMs });
+      return new DslDebuggingClient({ adminUrl, fetch, timeoutMs, headers });
     },
     inspect(): InspectClient {
-      return new InspectClient({ adminUrl: primaryUrl, fetch, timeoutMs });
+      return new InspectClient({ adminUrl: primaryUrl, fetch, timeoutMs, headers });
     },
     adminUrls(): readonly string[] {
       return config.oap.adminUrls;

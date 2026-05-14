@@ -185,10 +185,10 @@ const sections: NavSection[] = [
           :class="{ 'is-active': isActive(`/layer/${L.key}`) }"
         >
           <span class="layer-dot" :style="{ background: L.color }" />
-          <span class="layer-name">{{ L.name }}</span>
           <span class="layer-count" :title="`${L.serviceCount} service${L.serviceCount === 1 ? '' : 's'} reporting`">
             {{ L.serviceCount }}
           </span>
+          <span class="layer-name">{{ L.name }}</span>
         </RouterLink>
 
         <!-- Multi-feature layer: expander row + children. -->
@@ -199,11 +199,11 @@ const sections: NavSection[] = [
           @click="toggleLayer(L.key)"
         >
           <span class="layer-dot" :style="{ background: L.color }" />
-          <span class="layer-name" :style="{ fontWeight: expandedLayer === L.key ? 600 : 500 }">
-            {{ L.name }}
-          </span>
           <span class="layer-count" :title="`${L.serviceCount} service${L.serviceCount === 1 ? '' : 's'} reporting`">
             {{ L.serviceCount }}
+          </span>
+          <span class="layer-name" :style="{ fontWeight: expandedLayer === L.key ? 600 : 500 }">
+            {{ L.name }}
           </span>
           <span class="caret" :class="{ open: expandedLayer === L.key }">
             <Icon name="caret" :size="10" />
@@ -398,9 +398,13 @@ const sections: NavSection[] = [
   background: var(--sw-bg-2);
   border: 1px solid var(--sw-line-2);
   border-radius: 4px;
-  padding: 1px 6px;
-  min-width: 24px;
-  text-align: center;
+  padding: 1px 4px;
+  /* Fixed width so every row's name starts at the same column even when
+     counts swing wildly (1 ↔ 1000+). The chip is right-aligned inside
+     so the digit always sits flush against the name. */
+  width: 34px;
+  flex: 0 0 34px;
+  text-align: right;
 }
 .layer-row.is-active .layer-count {
   color: var(--sw-accent-2);

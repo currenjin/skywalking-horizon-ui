@@ -42,7 +42,7 @@ import type {
 import type { ConfigSource } from '../config/loader.js';
 import type { SessionStore } from '../auth/sessions.js';
 import { requireAuth } from '../auth/middleware.js';
-import { graphqlPost } from '../oap/graphql-client.js';
+import {  graphqlPost, buildOapOpts } from '../oap/graphql-client.js';
 import {
   allLayerTemplates,
   getLayerTemplate,
@@ -335,11 +335,7 @@ export function registerDashboardRoute(app: FastifyInstance, deps: DashboardRout
       let serviceName = parsed.data.service ?? '';
       let normal = true;
       const cfgCurrent = deps.config.current;
-      const opts = {
-        statusUrl: cfgCurrent.oap.statusUrl,
-        timeoutMs: cfgCurrent.oap.timeoutMs,
-        fetch: deps.fetch,
-      };
+      const opts = buildOapOpts(cfgCurrent, deps.fetch);
       const window = defaultWindow();
 
       const baseResp: DashboardResponse = {

@@ -38,7 +38,7 @@ import type { ConfigSource } from '../config/loader.js';
 import type { SessionStore } from '../auth/sessions.js';
 import type { FetchLike } from '@skywalking-horizon-ui/api-client';
 import { requireAuth } from '../auth/middleware.js';
-import { graphqlPost } from './graphql-client.js';
+import {  graphqlPost, buildOapOpts } from './graphql-client.js';
 
 export interface EndpointRouteDeps {
   config: ConfigSource;
@@ -115,11 +115,7 @@ export function registerEndpointRoute(app: FastifyInstance, deps: EndpointRouteD
       const limit = Math.max(20, Math.min(50, Number(q.limit) || 20));
 
       const cfgCurrent = deps.config.current;
-      const opts = {
-        statusUrl: cfgCurrent.oap.statusUrl,
-        timeoutMs: cfgCurrent.oap.timeoutMs,
-        fetch: deps.fetch,
-      };
+      const opts = buildOapOpts(cfgCurrent, deps.fetch);
       const window = defaultWindow();
 
       // Resolve a plain service name to an OAP id when needed (id-shaped

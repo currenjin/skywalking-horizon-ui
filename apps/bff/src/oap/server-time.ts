@@ -101,9 +101,18 @@ async function resolveServerTime(deps: ServerTimeDeps): Promise<ServerTime> {
       fetch: deps.fetch,
     });
     mqeBaseUrl = target.baseUrl;
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    };
+    const auth = deps.config().oap.auth;
+    if (auth) {
+      headers.authorization =
+        'Basic ' + Buffer.from(`${auth.username}:${auth.password}`, 'utf8').toString('base64');
+    }
     const init: RequestInit = {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers,
       body: JSON.stringify({ query: GRAPHQL_QUERY }),
       ...(ctrl ? { signal: ctrl.signal } : {}),
     };

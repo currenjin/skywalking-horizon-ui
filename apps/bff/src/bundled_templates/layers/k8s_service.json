@@ -1,0 +1,404 @@
+{
+  "key": "K8S_SERVICE",
+  "alias": "K8s Service",
+  "color": "var(--sw-purple)",
+  "documentLink": "https://skywalking.apache.org/docs/main/next/en/setup/backend/backend-k8s-network-monitoring/",
+  "aliases": {
+    "services": "K8s services",
+    "instances": "Pods",
+    "endpoints": "Endpoints"
+  },
+  "components": {
+    "service": true,
+    "instances": true,
+    "endpoints": true,
+    "endpointDependency": false,
+    "topology": true,
+    "traces": true,
+    "logs": true,
+    "ebpfProfiling": true
+  },
+  "layer-header": {
+    "orderBy": "httpCpm",
+    "columns": [
+      { "metric": "pods", "label": "Pods", "mqe": "latest(k8s_service_pod_total)", "aggregation": "sum" },
+      { "metric": "httpCpm", "label": "HTTP RPM", "unit": "rpm", "mqe": "kubernetes_service_http_call_cpm", "aggregation": "sum" },
+      { "metric": "httpRespTime", "label": "Latency", "unit": "ms", "mqe": "kubernetes_service_http_call_time", "aggregation": "avg" },
+      { "metric": "httpSuccess", "label": "Success Rate", "unit": "%", "mqe": "kubernetes_service_http_call_successful_rate/100", "aggregation": "avg" }
+    ]
+  },
+  "overview": {
+    "groups": [
+      {
+        "title": "HTTP",
+        "size": "auto",
+        "metrics": [
+          { "id": "httpCpm", "label": "RPM", "tip": "HTTP requests per minute observed by eBPF instrumentation.", "mqe": "kubernetes_service_http_call_cpm", "unit": "rpm", "aggregation": "sum" },
+          { "id": "httpRespTime", "label": "Latency", "tip": "Avg HTTP response time across the cluster.", "mqe": "kubernetes_service_http_call_time", "unit": "ms", "aggregation": "avg" },
+          { "id": "httpErr", "label": "Error Rate", "tip": "100 − HTTP success rate.", "mqe": "100 - kubernetes_service_http_call_successful_rate/100", "unit": "%", "aggregation": "avg" }
+        ]
+      },
+      {
+        "title": "Health",
+        "size": "square",
+        "metrics": [
+          {
+            "id": "apdex",
+            "label": "Apdex",
+            "tip": "User-satisfaction score on a 0 – 1 scale.",
+            "mqe": "kubernetes_service_apdex/10000",
+            "aggregation": "avg"
+          }
+        ]
+      }
+    ]
+  },
+  "dashboards": {
+    "service": [
+      {
+        "id": "pod_capacity",
+        "title": "Service Pods",
+        "tip": "Pod count + waiting / restart counters.",
+        "type": "line",
+        "expressions": [
+          "k8s_service_pod_total",
+          "latest(k8s_service_pod_status_waiting)",
+          "latest(k8s_service_pod_status_restarts_total)"
+        ],
+        "expressionLabels": ["total", "waiting", "restarts"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "cpu_resources",
+        "title": "CPU Resources",
+        "type": "line",
+        "unit": "m",
+        "expressions": [
+          "k8s_service_cpu_cores_requests",
+          "k8s_service_cpu_cores_limits"
+        ],
+        "expressionLabels": ["requests", "limits"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "memory_resources",
+        "title": "Memory Resources",
+        "type": "line",
+        "unit": "Mi",
+        "expressions": [
+          "k8s_service_memory_requests/1024/1024",
+          "k8s_service_memory_limits/1024/1024"
+        ],
+        "expressionLabels": ["requests", "limits"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "pod_cpu_usage",
+        "title": "Pod CPU Usage",
+        "type": "line",
+        "unit": "m",
+        "expressions": ["k8s_service_pod_cpu_usage"],
+        "span": 6,
+        "rowSpan": 2
+      },
+      {
+        "id": "pod_memory_usage",
+        "title": "Pod Memory Usage",
+        "type": "line",
+        "unit": "Mi",
+        "expressions": ["k8s_service_pod_memory_usage/1024/1024"],
+        "span": 6,
+        "rowSpan": 2
+      },
+      {
+        "id": "http_call_cpm",
+        "title": "HTTP Request RPM",
+        "type": "line",
+        "unit": "rpm",
+        "expressions": ["kubernetes_service_http_call_cpm"],
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "http_call_time",
+        "title": "HTTP Response Time",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["kubernetes_service_http_call_time"],
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "http_status",
+        "title": "HTTP Status Code RPM",
+        "tip": "Per-class status code counts (1xx / 2xx / 3xx / 4xx / 5xx).",
+        "type": "line",
+        "expressions": [
+          "kubernetes_service_http_status_1xx_cpm",
+          "kubernetes_service_http_status_2xx_cpm",
+          "kubernetes_service_http_status_3xx_cpm",
+          "kubernetes_service_http_status_4xx_cpm",
+          "kubernetes_service_http_status_5xx_cpm"
+        ],
+        "expressionLabels": ["1xx", "2xx", "3xx", "4xx", "5xx"],
+        "span": 6,
+        "rowSpan": 2
+      },
+      {
+        "id": "http_req_resp_size",
+        "title": "HTTP Request / Response Size",
+        "type": "line",
+        "unit": "KB",
+        "expressions": [
+          "kubernetes_service_http_avg_req_header_size/1024",
+          "kubernetes_service_http_avg_req_body_size/1024",
+          "kubernetes_service_http_avg_resp_header_size/1024",
+          "kubernetes_service_http_avg_resp_body_size/1024"
+        ],
+        "expressionLabels": ["req hdr", "req body", "resp hdr", "resp body"],
+        "span": 6,
+        "rowSpan": 2
+      },
+      {
+        "id": "tcp_connect",
+        "title": "TCP Connect",
+        "tip": "Client-side connect attempts and successes per minute.",
+        "type": "line",
+        "expressions": [
+          "kubernetes_service_connect_cpm",
+          "kubernetes_service_connect_success_cpm"
+        ],
+        "expressionLabels": ["connect", "success"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "tcp_connect_time",
+        "title": "TCP Connect Duration",
+        "type": "line",
+        "unit": "ns",
+        "expressions": ["kubernetes_service_connect_time"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "tcp_accept",
+        "title": "TCP Accept",
+        "type": "line",
+        "expressions": [
+          "kubernetes_service_accept_cpm"
+        ],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "tcp_packets",
+        "title": "TCP Packets",
+        "tip": "Read + write packet counts per minute, including retransmits.",
+        "type": "line",
+        "expressions": [
+          "kubernetes_service_read_package_cpm",
+          "kubernetes_service_write_package_cpm",
+          "kubernetes_service_write_retrains_package_cpm"
+        ],
+        "expressionLabels": ["read", "write", "write retrans"],
+        "span": 6,
+        "rowSpan": 2
+      },
+      {
+        "id": "tcp_bytes",
+        "title": "TCP Bytes",
+        "type": "line",
+        "unit": "KB",
+        "expressions": [
+          "kubernetes_service_read_package_size/1024",
+          "kubernetes_service_write_package_size/1024"
+        ],
+        "expressionLabels": ["read", "write"],
+        "span": 6,
+        "rowSpan": 2
+      }
+    ],
+    "instance": [
+      {
+        "id": "pod_http_cpm",
+        "title": "Pod HTTP RPM",
+        "type": "line",
+        "unit": "rpm",
+        "expressions": ["kubernetes_service_instance_http_call_cpm"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "pod_http_time",
+        "title": "Pod HTTP Response Time",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["kubernetes_service_instance_http_call_time"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "pod_http_status",
+        "title": "Pod HTTP Status Code RPM",
+        "type": "line",
+        "expressions": [
+          "kubernetes_service_instance_http_status_1xx_cpm",
+          "kubernetes_service_instance_http_status_2xx_cpm",
+          "kubernetes_service_instance_http_status_3xx_cpm",
+          "kubernetes_service_instance_http_status_4xx_cpm",
+          "kubernetes_service_instance_http_status_5xx_cpm"
+        ],
+        "expressionLabels": ["1xx", "2xx", "3xx", "4xx", "5xx"],
+        "span": 6,
+        "rowSpan": 2
+      },
+      {
+        "id": "pod_http_sizes",
+        "title": "Pod HTTP Sizes",
+        "type": "line",
+        "unit": "KB",
+        "expressions": [
+          "kubernetes_service_instance_http_avg_req_header_size/1024",
+          "kubernetes_service_instance_http_avg_req_body_size/1024",
+          "kubernetes_service_instance_http_avg_resp_header_size/1024",
+          "kubernetes_service_instance_http_avg_resp_body_size/1024"
+        ],
+        "expressionLabels": ["req hdr", "req body", "resp hdr", "resp body"],
+        "span": 6,
+        "rowSpan": 2
+      },
+      {
+        "id": "pod_tcp_connect",
+        "title": "Pod TCP Connect",
+        "type": "line",
+        "expressions": [
+          "kubernetes_service_instance_connect_cpm",
+          "kubernetes_service_instance_connect_success_cpm"
+        ],
+        "expressionLabels": ["connect", "success"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "pod_tcp_packets",
+        "title": "Pod TCP Packets",
+        "type": "line",
+        "expressions": [
+          "kubernetes_service_instance_read_package_cpm",
+          "kubernetes_service_instance_write_package_cpm",
+          "kubernetes_service_instance_write_retrains_package_cpm"
+        ],
+        "expressionLabels": ["read", "write", "write retrans"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "pod_tcp_bytes",
+        "title": "Pod TCP Bytes",
+        "type": "line",
+        "unit": "KB",
+        "expressions": [
+          "kubernetes_service_instance_read_package_size/1024",
+          "kubernetes_service_instance_write_package_size/1024"
+        ],
+        "expressionLabels": ["read", "write"],
+        "span": 4,
+        "rowSpan": 2
+      }
+    ],
+    "endpoint": [
+      {
+        "id": "ep_http_cpm",
+        "title": "Endpoint HTTP RPM",
+        "type": "line",
+        "unit": "rpm",
+        "expressions": ["kubernetes_service_endpoint_http_call_cpm"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "ep_http_time",
+        "title": "Endpoint HTTP Response Time",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["kubernetes_service_endpoint_http_call_time"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "ep_http_status",
+        "title": "Endpoint Status Code RPM",
+        "type": "line",
+        "expressions": [
+          "kubernetes_service_endpoint_http_status_1xx_cpm",
+          "kubernetes_service_endpoint_http_status_2xx_cpm",
+          "kubernetes_service_endpoint_http_status_3xx_cpm",
+          "kubernetes_service_endpoint_http_status_4xx_cpm",
+          "kubernetes_service_endpoint_http_status_5xx_cpm"
+        ],
+        "expressionLabels": ["1xx", "2xx", "3xx", "4xx", "5xx"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "ep_http_req_sizes",
+        "title": "Endpoint Request Sizes",
+        "type": "line",
+        "unit": "KB",
+        "expressions": [
+          "kubernetes_service_endpoint_http_avg_req_header_size/1024",
+          "kubernetes_service_endpoint_http_avg_req_body_size/1024"
+        ],
+        "expressionLabels": ["header", "body"],
+        "span": 6,
+        "rowSpan": 2
+      },
+      {
+        "id": "ep_http_resp_sizes",
+        "title": "Endpoint Response Sizes",
+        "type": "line",
+        "unit": "KB",
+        "expressions": [
+          "kubernetes_service_endpoint_http_avg_resp_header_size/1024",
+          "kubernetes_service_endpoint_http_avg_resp_body_size/1024"
+        ],
+        "expressionLabels": ["header", "body"],
+        "span": 6,
+        "rowSpan": 2
+      }
+    ]
+  },
+  "topology": {
+    "nodeMetrics": [
+      { "id": "httpCpm", "label": "RPM", "mqe": "kubernetes_service_http_call_cpm", "unit": "rpm", "role": "center", "aggregation": "avg" },
+      {
+        "id": "httpSuccess",
+        "label": "Success Rate",
+        "mqe": "kubernetes_service_http_call_successful_rate/100",
+        "unit": "%",
+        "role": "ring",
+        "aggregation": "avg",
+        "thresholds": {
+          "invertHealth": true,
+          "invertBase": 100,
+          "ok": 0.1,
+          "warn": 1,
+          "danger": 5
+        }
+      },
+      { "id": "httpRespTime", "label": "Latency", "mqe": "kubernetes_service_http_call_time", "unit": "ms", "role": "secondary", "aggregation": "avg" }
+    ],
+    "linkServerMetrics": [
+      { "id": "cpm", "label": "RPM", "mqe": "kubernetes_service_relation_server_http_call_cpm", "unit": "rpm", "role": "lineServer", "aggregation": "avg" },
+      { "id": "respTime", "label": "Avg response time", "mqe": "kubernetes_service_relation_server_http_call_time", "unit": "ms", "aggregation": "avg" }
+    ],
+    "linkClientMetrics": [
+      { "id": "cpm", "label": "RPM", "mqe": "kubernetes_service_relation_client_http_call_cpm", "unit": "rpm", "role": "lineClient", "aggregation": "avg" },
+      { "id": "respTime", "label": "Avg response time", "mqe": "kubernetes_service_relation_client_http_call_time", "unit": "ms", "aggregation": "avg" }
+    ]
+  }
+}

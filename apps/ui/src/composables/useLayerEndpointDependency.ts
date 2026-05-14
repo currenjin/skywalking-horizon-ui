@@ -23,6 +23,7 @@
 
 import { computed, type Ref } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
+import { useAutoRefreshSubscribe } from './useAutoRefreshSubscribe';
 import { bffClient } from '@/api/client';
 
 export function useLayerEndpointDependency(
@@ -43,6 +44,8 @@ export function useLayerEndpointDependency(
     ),
     staleTime: 30_000,
   });
+  useAutoRefreshSubscribe(() => q.refetch());
+
   return {
     data: computed(() => q.data.value ?? null),
     nodes: computed(() => q.data.value?.nodes ?? []),

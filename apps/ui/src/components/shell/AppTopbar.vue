@@ -15,10 +15,11 @@
   limitations under the License.
 -->
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import Icon from '@/components/icons/Icon.vue';
 import { useOapInfo } from '@/composables/useOapInfo';
+import { useAutoRefreshStore } from '@/stores/autoRefresh';
 
 const route = useRoute();
 
@@ -68,6 +69,76 @@ const tzMismatch = computed<boolean>(() => {
   const browserMin = -new Date().getTimezoneOffset();
   return browserMin !== serverTzMin.value;
 });
+
+/**
+ * Routes that own their own time range — the global topbar picker +
+ * refresh button get disabled (greyed + non-clickable) so the
+ * operator knows the page's local picker is the source of truth.
+ *
+ * Add more routes here as Logs / Traces / etc. each opt out of the
+ * global rolling window in favour of a per-page picker.
+ */
+const TIME_RANGE_OPT_OUT = [/^\/layer\/[^/]+\/trace$/];
+const ownsTimeRange = computed<boolean>(() => TIME_RANGE_OPT_OUT.some((r) => r.test(route.path)));
+const globalTimeTooltip = computed<string>(() => {
+  if (ownsTimeRange.value) {
+    return 'This page uses its own time range — disable the page picker to use the global one.';
+  }
+  return `Browser local time · ${localTzLabel.value}`;
+});
+
+/**
+ * Auto-refresh: store drives the ticker; the topbar drives the UI
+ * (countdown + spinning icon + interval dropdown). When the operator
+ * lands on an opt-out route the ticker suspends; on leaving the
+ * route it resumes + fires one immediate tick so the underlying page
+ * gets fresh data right away.
+ */
+const auto = useAutoRefreshStore();
+watch(
+  ownsTimeRange,
+  (now) => {
+    if (now) auto.suspend();
+    else auto.resume();
+  },
+  { immediate: true },
+);
+
+const REFRESH_PRESETS: Array<{ label: string; sec: number | null }> = [
+  { label: 'Off', sec: null },
+  { label: '5s', sec: 5 },
+  { label: '15s', sec: 15 },
+  { label: '30s', sec: 30 },
+  { label: '1m', sec: 60 },
+  { label: '5m', sec: 300 },
+];
+const refreshMenuOpen = ref(false);
+const refreshClusterEl = ref<HTMLElement | null>(null);
+function pickRefresh(sec: number | null): void {
+  auto.setInterval(sec);
+  refreshMenuOpen.value = false;
+}
+function onWindowClickClose(ev: MouseEvent): void {
+  if (!refreshMenuOpen.value) return;
+  const el = refreshClusterEl.value;
+  if (el && !el.contains(ev.target as Node)) {
+    refreshMenuOpen.value = false;
+  }
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('click', onWindowClickClose);
+}
+const refreshLabel = computed<string>(() => {
+  if (ownsTimeRange.value) return 'Paused';
+  if (auto.intervalSec === null) return 'Off';
+  if (auto.secondsUntilNext === null) return '—';
+  return `${auto.secondsUntilNext}s`;
+});
+const refreshTooltip = computed<string>(() => {
+  if (ownsTimeRange.value) return 'Auto-refresh paused on this page';
+  if (auto.intervalSec === null) return 'Auto-refresh off · click to refresh now';
+  return `Auto-refresh every ${auto.intervalSec}s · ${auto.secondsUntilNext ?? '—'}s remaining · click to refresh now`;
+});
 </script>
 
 <template>
@@ -94,18 +165,121 @@ const tzMismatch = computed<boolean>(() => {
           {{ tzOffsetLabel }}
         </span>
       </RouterLink>
-      <div class="sw-btn" :title="`Browser local time · ${localTzLabel}`">
+      <div class="sw-btn" :class="{ 'is-disabled': ownsTimeRange }" :title="globalTimeTooltip">
         <Icon name="clock" :size="12" />
-        <span>Last 30 minutes</span>
+        <span>{{ ownsTimeRange ? 'Page time range' : 'Last 30 minutes' }}</span>
         <Icon name="caret" :size="10" />
       </div>
-      <div class="sw-btn is-icon"><Icon name="refresh" :size="12" /></div>
+      <!-- Auto-refresh cluster: countdown + spinning button on the
+           left, dropdown caret on the right. Click the icon to
+           refresh now; click the caret to pick an interval. -->
+      <div ref="refreshClusterEl" class="refresh-cluster" :class="{ 'is-disabled': ownsTimeRange }">
+        <button
+          type="button"
+          class="sw-btn is-icon refresh-now"
+          :class="{ spinning: auto.effectiveEnabled }"
+          :title="refreshTooltip"
+          :disabled="ownsTimeRange"
+          @click="auto.refreshNow()"
+        ><Icon name="refresh" :size="12" /></button>
+        <span class="refresh-countdown mono" :title="refreshTooltip">{{ refreshLabel }}</span>
+        <button
+          type="button"
+          class="sw-btn refresh-caret"
+          :title="'Pick refresh interval'"
+          :disabled="ownsTimeRange"
+          @click="refreshMenuOpen = !refreshMenuOpen"
+        ><Icon name="caret" :size="10" /></button>
+        <transition name="rf-menu">
+          <ul v-if="refreshMenuOpen" class="rf-menu">
+            <li
+              v-for="p in REFRESH_PRESETS"
+              :key="String(p.sec)"
+              :class="{ on: auto.intervalSec === p.sec }"
+              @click="pickRefresh(p.sec)"
+            >{{ p.label }}</li>
+          </ul>
+        </transition>
+      </div>
       <div class="sw-btn is-icon"><Icon name="bell" :size="12" /></div>
     </div>
   </header>
 </template>
 
 <style scoped>
+/* Disabled state for global time-range / refresh chips when the
+   current page owns its own time range. Greys out without removing
+   the chip so the operator still sees the affordance + tooltip. */
+.sw-btn.is-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+  filter: grayscale(0.6);
+}
+
+/* Auto-refresh cluster */
+.refresh-cluster {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.refresh-cluster.is-disabled {
+  opacity: 0.45;
+  filter: grayscale(0.6);
+}
+.refresh-now {
+  cursor: pointer;
+}
+.refresh-now.spinning :deep(svg) {
+  animation: refresh-spin 1.6s linear infinite;
+  transform-origin: 50% 50%;
+}
+@keyframes refresh-spin {
+  to { transform: rotate(360deg); }
+}
+.refresh-countdown {
+  font-size: 10.5px;
+  color: var(--sw-fg-2);
+  min-width: 28px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.refresh-caret {
+  cursor: pointer;
+  padding: 0 4px;
+  min-width: auto;
+}
+.rf-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  list-style: none;
+  padding: 4px;
+  background: var(--sw-bg-1);
+  border: 1px solid var(--sw-line);
+  border-radius: 6px;
+  min-width: 96px;
+  z-index: 10;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.rf-menu li {
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--sw-fg-1);
+  cursor: pointer;
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.rf-menu li:hover { background: var(--sw-bg-2); }
+.rf-menu li.on { background: var(--sw-accent-soft); color: var(--sw-accent-2); font-weight: 600; }
+.rf-menu-enter-from, .rf-menu-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+.rf-menu-enter-active, .rf-menu-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
 .oap-chip {
   text-decoration: none;
   font-family: var(--sw-mono);

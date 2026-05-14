@@ -17,6 +17,7 @@
 
 import { computed } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
+import { useAutoRefreshSubscribe } from './useAutoRefreshSubscribe';
 import { parseOapTimezoneMinutes, type OapInfo } from '@skywalking-horizon-ui/api-client';
 import { bffClient } from '@/api/client';
 
@@ -84,6 +85,9 @@ export function useOapInfo() {
     if (healthScore.value > 0) return 'warn';
     return 'ok';
   });
+
+  useAutoRefreshSubscribe(() => q.refetch());
+
 
   return {
     isLoading: q.isLoading,

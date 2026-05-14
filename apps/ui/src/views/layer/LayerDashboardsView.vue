@@ -523,7 +523,7 @@ function isVisible(
                  Future runtime work will add trace-id drill-in. -->
             <TopList
               v-if="resultsById.get(w.id)?.records?.length"
-              :items="resultsById.get(w.id)!.records!"
+              :items="resultsById.get(w.id)!.records!.map((r) => ({ name: r.name, value: r.value ?? null }))"
               :unit="w.unit"
               :color="widgetColor(w)"
             />

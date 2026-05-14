@@ -36,9 +36,11 @@ import { useRoute, useRouter } from 'vue-router';
 import type {
   EndpointDependencyCall,
   EndpointDependencyNode,
+  EndpointDependencyResponse,
   LayerDef,
   TopologyMetricDef,
 } from '@/api/client';
+import { bffClient } from '@/api/client';
 import { useLayerEndpointDependency } from '@/composables/useLayerEndpointDependency';
 import { useLayerEndpoints } from '@/composables/useLayerEndpoints';
 import { useLayerLanding } from '@/composables/useLayerLanding';
@@ -125,13 +127,96 @@ watchEffect(() => {
   if (first) setSelectedEndpoint(first.name);
 });
 
-const { nodes, calls, isLoading, isFetching, data } = useLayerEndpointDependency(
+const { nodes: baseNodes, calls: baseCalls, isLoading, isFetching, data } = useLayerEndpointDependency(
   layerKey,
   serviceName,
   selectedEndpoint,
 );
 const reachable = computed(() => data.value?.reachable !== false);
 const errorText = computed(() => data.value?.error ?? null);
+
+// ── Interactive expansion ─────────────────────────────────────────
+// Each click on a node's left / right expand button fires another
+// `endpoint-dependency` query for THAT endpoint and merges the
+// returned graph into the rendered set. Keyed by `${nodeId}:dir` so
+// repeat clicks are idempotent (same direction = no-op; future
+// "collapse" affordance can lift the entry instead).
+const expansions = ref<Map<string, EndpointDependencyResponse>>(new Map());
+const expansionsLoading = ref<Set<string>>(new Set());
+function hasExpansion(node: EndpointDependencyNode, dir: 'upstream' | 'downstream'): boolean {
+  return expansions.value.has(`${node.id}:${dir}`);
+}
+async function expandNode(node: EndpointDependencyNode, dir: 'upstream' | 'downstream'): Promise<void> {
+  const key = `${node.id}:${dir}`;
+  if (expansions.value.has(key) || expansionsLoading.value.has(key)) return;
+  expansionsLoading.value.add(key);
+  try {
+    const resp = await bffClient.layerEndpointDependency(
+      layerKey.value,
+      node.serviceName,
+      node.name,
+    );
+    // Mutate the Map and re-assign to force reactivity.
+    const next = new Map(expansions.value);
+    next.set(key, resp);
+    expansions.value = next;
+  } catch {
+    // Soft-fail — the operator can click again to retry.
+  } finally {
+    const loading = new Set(expansionsLoading.value);
+    loading.delete(key);
+    expansionsLoading.value = loading;
+  }
+}
+// Reset expansions whenever the focus endpoint changes — the
+// previous expansion graph is irrelevant against a new focus.
+watch(selectedEndpoint, () => {
+  expansions.value = new Map();
+  expansionsLoading.value = new Set();
+});
+
+// ── Merged graph = focus response ∪ all expansion responses.
+//    Deduplicate by node id and call id; later expansions don't
+//    overwrite earlier metric values, which keeps the first-seen
+//    snapshot stable while the operator browses. -------------------
+const nodes = computed<EndpointDependencyNode[]>(() => {
+  const map = new Map<string, EndpointDependencyNode>();
+  for (const n of baseNodes.value) map.set(n.id, n);
+  for (const exp of expansions.value.values()) {
+    for (const n of exp.nodes) if (!map.has(n.id)) map.set(n.id, n);
+  }
+  return [...map.values()];
+});
+/** True when the call carries at least one resolved metric value. */
+function callHasMetrics(c: EndpointDependencyCall): boolean {
+  for (const v of Object.values(c.metrics ?? {})) if (v !== null) return true;
+  return false;
+}
+const calls = computed<EndpointDependencyCall[]>(() => {
+  // Merge with "prefer-metrics-populated" semantics: a later
+  // expansion's view of the same edge wins when it has actual
+  // metric values while the earlier copy was a null shell. Without
+  // this, the very first fetch (which might have been served before
+  // the BFF's virtual-source filter relaxation) keeps null-metric
+  // edges in place even after the operator expanded a neighbour
+  // that returns the correctly-populated row.
+  const map = new Map<string, EndpointDependencyCall>();
+  function consider(c: EndpointDependencyCall): void {
+    const existing = map.get(c.id);
+    if (!existing) {
+      map.set(c.id, c);
+      return;
+    }
+    if (!callHasMetrics(existing) && callHasMetrics(c)) {
+      map.set(c.id, c);
+    }
+  }
+  for (const c of baseCalls.value) consider(c);
+  for (const exp of expansions.value.values()) {
+    for (const c of exp.calls) consider(c);
+  }
+  return [...map.values()];
+});
 
 // ── Config from response (operator-edited layer JSON). Mirrors the
 // service-map view's binding pattern: a role → metric def lookup
@@ -144,7 +229,36 @@ function pickByRole(defs: TopologyMetricDef[], role: TopologyMetricDef['role']):
   return defs.find((d) => d.role === role) ?? null;
 }
 const centerDef = computed(() => pickByRole(cfg.value.nodeMetrics, 'center'));
-const ringDef = computed(() => pickByRole(cfg.value.nodeMetrics, 'ring'));
+/**
+ * Per-user threshold overrides take precedence over the template's
+ * defaults. Setup store keys them by `<scope>.<metricId>` —
+ * the API-dependency view uses scope `dependency`.
+ */
+const setupCfg = computed(() => store.ensure(layerKey.value, {
+  slots: safeLayer.value.slots,
+  caps: safeLayer.value.caps,
+  metrics: safeLayer.value.metrics,
+  overview: safeLayer.value.overview,
+}));
+function mergeThresholdOverride(def: TopologyMetricDef): TopologyMetricDef {
+  const ov = setupCfg.value.landing.thresholdOverrides?.[`dependency.${def.id}`];
+  if (!ov) return def;
+  return {
+    ...def,
+    thresholds: {
+      ...(def.thresholds ?? {}),
+      ...(ov.ok !== undefined ? { ok: ov.ok } : {}),
+      ...(ov.warn !== undefined ? { warn: ov.warn } : {}),
+      ...(ov.danger !== undefined ? { danger: ov.danger } : {}),
+      ...(ov.invertHealth !== undefined ? { invertHealth: ov.invertHealth } : {}),
+      ...(ov.invertBase !== undefined ? { invertBase: ov.invertBase } : {}),
+    },
+  };
+}
+const ringDef = computed(() => {
+  const def = pickByRole(cfg.value.nodeMetrics, 'ring');
+  return def ? mergeThresholdOverride(def) : null;
+});
 const secondaryDef = computed(() => pickByRole(cfg.value.nodeMetrics, 'secondary'));
 const lineDef = computed(() => pickByRole(cfg.value.linkMetrics ?? [], 'lineServer'));
 
@@ -248,9 +362,14 @@ const layerColumns = computed<LayerColumn[]>(() => {
     const visible = list.slice(0, NODES_PER_LAYER);
     const hidden = list.length - visible.length;
     let label: string;
-    if (i < 0) label = `L${i} · Upstream`;
+    // Layer convention: focus = L0; layers to the LEFT (negative
+     // index, callers / "before") = Downstream in the operator's
+     // wording; layers to the RIGHT (positive, callees / "after")
+     // = Upstream. Matches the nginx/proxy mental model the team
+     // already uses.
+    if (i < 0) label = `L${i} · Downstream`;
     else if (i === 0) label = 'L0 · Focus';
-    else label = `L+${i} · Downstream`;
+    else label = `L+${i} · Upstream`;
     return { index: i, label, visible, hidden };
   });
 });
@@ -258,14 +377,31 @@ const layerColumns = computed<LayerColumn[]>(() => {
 // ── SVG layout math. The template binds NW / COL_GAP via the same
 // names; exposing them on a const-bag keeps Vue's setup-script
 // auto-binding happy without resorting to `defineExpose`.
-const NW = 160;
-const NH = 56;
-const COL_GAP = 220;
-const ROW_GAP = 72;
+const NW = 180;
+// Taller box: 3 stacked rows (service name / API name / RPM).
+const NH = 76;
+// Wider gap between columns so the curved edge has room to carry
+// the line-metric chip (60-80px) without colliding with adjacent
+// node boxes.
+const COL_GAP = 320;
+const ROW_GAP = 96;
 const W = computed(() => Math.max(800, layerColumns.value.length * COL_GAP + 80));
 const H = computed(() => {
   const maxNodes = Math.max(1, ...layerColumns.value.map((c) => c.visible.length));
   return 80 + maxNodes * ROW_GAP + 40;
+});
+
+/**
+ * Card height adapts to the graph the same way the topology view
+ * does: 60% floor of a 780px baseline, capped at 1100px. Operators
+ * get a consistent envelope across both dependency tabs.
+ */
+const CARD_BASELINE = 780;
+const CARD_MIN = Math.round(CARD_BASELINE * 0.6);
+const CARD_MAX = 1100;
+const cardHeightPx = computed<number>(() => {
+  const ideal = H.value + 80;
+  return Math.max(CARD_MIN, Math.min(CARD_MAX, ideal));
 });
 
 interface Pos { x: number; y: number; col: number; row: number }
@@ -289,24 +425,40 @@ const visibleCalls = computed<EndpointDependencyCall[]>(() => {
 
 // Kind colour band — uses the endpoint's `type` field, then service
 // name fallbacks (db/cache/mq/ext).
-function kindColor(n: EndpointDependencyNode): string {
-  const t = (n.type ?? '').toUpperCase();
-  if (t.includes('DATABASE') || t.includes('SQL')) return 'var(--sw-cyan)';
-  if (t.includes('CACHE') || t.includes('REDIS')) return 'var(--sw-pink)';
-  if (t.includes('MQ') || t.includes('KAFKA') || t.includes('PROD')) return 'var(--sw-warn)';
-  if (t.includes('HTTP') || t.includes('GRPC') || t.includes('RPC')) return 'var(--sw-purple)';
-  if (!n.isReal) return 'var(--sw-fg-2)';
-  return 'var(--sw-info)';
+/**
+ * Health-band colour from the configured ring metric. Reads the
+ * operator's explicit `thresholds` block when present; otherwise
+ * falls back to the historical err-% heuristic.
+ */
+function bandColor(value: number, t: NonNullable<TopologyMetricDef['thresholds']>): string {
+  const invertBase = t.invertBase ?? 100;
+  const v = t.invertHealth ? Math.max(0, invertBase - value) : value;
+  const ok = t.ok ?? 0.1;
+  const warn = t.warn ?? 1;
+  const danger = t.danger ?? 5;
+  if (v > danger) return 'var(--sw-err)';
+  if (v > warn) return 'var(--sw-warn)';
+  if (v > ok) return '#fbbf24';
+  return 'var(--sw-ok)';
 }
-function kindLabel(n: EndpointDependencyNode): string {
-  const t = (n.type ?? '').toUpperCase();
-  if (t.includes('DATABASE') || t.includes('SQL')) return 'DB';
-  if (t.includes('CACHE')) return 'CACHE';
-  if (t.includes('MQ') || t.includes('KAFKA')) return 'QUEUE';
-  if (t.includes('RPC') || t.includes('GRPC')) return 'RPC';
-  if (!n.isReal) return n.name === 'User' ? 'CLIENT' : 'EXT';
-  return 'ENDPOINT';
+function ringColor(n: EndpointDependencyNode): string {
+  const def = ringDef.value;
+  if (!def) return 'var(--sw-line-2)';
+  const v = nodeVal(n, def);
+  if (v === null) return 'var(--sw-fg-3)';
+  if (def.thresholds) return bandColor(v, def.thresholds);
+  const isHealthHigh = /sla|success|apdex/i.test(def.id) || /sla|apdex|success/i.test(def.label);
+  const errPct = isHealthHigh ? Math.max(0, 100 - v) : v;
+  if (errPct > 5) return 'var(--sw-err)';
+  if (errPct > 1) return 'var(--sw-warn)';
+  if (errPct > 0.1) return '#fbbf24';
+  return 'var(--sw-ok)';
 }
+
+/* `kindColor` / `kindLabel` were removed — endpoint nodes don't
+ * carry meaningful component classification at the OAP wire level,
+ * so the visual cue was unreliable. SLA-band border + focus star
+ * carry all the per-node signal. */
 
 // ── Selected node popout state. Anchors the design's tail callout
 // just right of the clicked node.
@@ -332,6 +484,19 @@ const popoutDownstream = computed(() => {
     .map((c) => nodes.value.find((n) => n.id === c.target))
     .filter((n): n is EndpointDependencyNode => !!n);
 });
+
+/**
+ * Mirror of the topology view's row-label formatter — collapses the
+ * redundant unit suffix (e.g. label="RPM" + unit="rpm" → "RPM") and
+ * uppercases units per the design rule.
+ */
+function formatEdgeRowLabel(row: { label: string; unit?: string | null }): string {
+  const lab = (row.label ?? '').trim();
+  const u = (row.unit ?? '').trim();
+  if (!u) return lab;
+  if (lab.toLowerCase() === u.toLowerCase()) return lab.toUpperCase();
+  return `${lab} (${u.toUpperCase()})`;
+}
 
 function jumpToService(): void {
   const sel = selectedNode.value;
@@ -443,6 +608,28 @@ const selectedCallTarget = computed<EndpointDependencyNode | null>(() => {
 function edgeSeries(c: EndpointDependencyCall, def: TopologyMetricDef): Array<number | null> {
   return c.metricSeries?.[def.id] ?? [];
 }
+function seriesAt(arr: Array<number | null>, idx: number): number | null {
+  if (idx < 0 || idx >= arr.length) return null;
+  return arr[idx];
+}
+
+// Same synced-cursor model as the topology view — single hovered
+// row at a time, both the chart and the value tip update together.
+// API-dep is server-side only so there's no diff to show, just the
+// value at the hovered bucket.
+const hoveredEdgeRowId = ref<string | null>(null);
+const hoveredEdgeBucket = ref<number | null>(null);
+function onEdgeBucketHover(rowId: string, bucket: number): void {
+  hoveredEdgeRowId.value = rowId;
+  hoveredEdgeBucket.value = bucket;
+}
+function onEdgeBucketLeave(): void {
+  hoveredEdgeRowId.value = null;
+  hoveredEdgeBucket.value = null;
+}
+function edgeRowCrosshair(rowId: string): number | null {
+  return hoveredEdgeRowId.value === rowId ? hoveredEdgeBucket.value : null;
+}
 </script>
 
 <template>
@@ -503,7 +690,7 @@ function edgeSeries(c: EndpointDependencyCall, def: TopologyMetricDef): Array<nu
       {{ errorText ?? 'API dependency feed failed — check the BFF and OAP.' }}
     </div>
 
-    <section v-if="selectedEndpoint" class="ep-graph-card sw-card">
+    <section v-if="selectedEndpoint" class="ep-graph-card sw-card" :style="{ height: cardHeightPx + 'px' }">
       <!-- Two-column layout: graph on the left, selection detail
            panel on the right. Mirrors the topology view's sidebar so
            operators get the same interaction pattern across the two
@@ -571,17 +758,17 @@ function edgeSeries(c: EndpointDependencyCall, def: TopologyMetricDef): Array<nu
             <path
               :d="callPathD(c)"
               fill="none"
-              :stroke="selectedCallId === c.id ? 'var(--sw-accent-2)' : c.source === focusedId || c.target === focusedId ? 'var(--sw-accent)' : 'var(--sw-line-3)'"
+              :stroke="selectedCallId === c.id ? 'var(--sw-accent-2)' : 'var(--sw-accent)'"
               :stroke-width="(() => {
-                if (selectedCallId === c.id) return 3;
-                if (c.source === focusedId || c.target === focusedId) return 2.4;
+                if (selectedCallId === c.id) return 3.4;
+                if (c.source === focusedId || c.target === focusedId) return 2.8;
                 const v = edgeVal(c, lineDef);
-                if (v === null) return 1.2;
-                if (v > 5000) return 2.2;
-                if (v > 500) return 1.8;
-                return 1.2;
+                if (v === null) return 1.4;
+                if (v > 5000) return 2.4;
+                if (v > 500) return 2;
+                return 1.4;
               })()"
-              :opacity="selectedCallId === c.id ? 1 : c.source === focusedId || c.target === focusedId ? 0.95 : 0.4"
+              :opacity="selectedCallId === c.id ? 1 : c.source === focusedId || c.target === focusedId ? 0.95 : 0.6"
               stroke-linecap="round"
               style="pointer-events: none"
             >
@@ -644,57 +831,149 @@ function edgeSeries(c: EndpointDependencyCall, def: TopologyMetricDef): Array<nu
             class="ep-node"
             @click="selectedNodeId = selectedNodeId === n.id ? null : n.id"
           >
+            <!-- Selection halo only — the FOCUS node is identifiable
+                 by its column header (`L0 · Focus`) and an inset
+                 "★" badge below; no orange halo (was too easily
+                 confused with the operator-selected node). -->
             <rect
-              v-if="n.id === focusedId"
-              x="-3"
-              y="-3"
-              :width="NW + 6"
-              :height="NH + 6"
-              rx="9"
+              v-if="n.id === selectedNodeId"
+              x="-4"
+              y="-4"
+              :width="NW + 8"
+              :height="NH + 8"
+              rx="10"
               fill="var(--sw-accent)"
               opacity="0.18"
             />
+            <!-- Body fill. Border colour follows the ring metric
+                 (SLA band). Selected node gets the accent border;
+                 focus keeps its ring border — distinct treatments. -->
             <rect
               x="0"
               y="0"
               :width="NW"
               :height="NH"
-              rx="7"
-              :fill="n.id === selectedNodeId ? 'rgba(249,115,22,0.10)' : n.id === focusedId ? 'rgba(249,115,22,0.06)' : 'var(--sw-bg-2)'"
-              :stroke="n.id === selectedNodeId || n.id === focusedId ? 'var(--sw-accent)' : 'var(--sw-line-2)'"
-              :stroke-width="n.id === selectedNodeId || n.id === focusedId ? 1.6 : 1"
+              rx="6"
+              :fill="n.id === selectedNodeId ? 'rgba(249,115,22,0.10)' : 'var(--sw-bg-2)'"
+              :stroke="n.id === selectedNodeId ? 'var(--sw-accent)' : ringColor(n)"
+              :stroke-width="n.id === selectedNodeId ? 2 : 1.8"
             />
-            <rect x="0" y="0" width="3" :height="NH" :fill="kindColor(n)" rx="1" />
-            <text x="10" y="14" :fill="kindColor(n)" font-size="8.5" font-weight="700" letter-spacing="0.5">
-              {{ kindLabel(n) }}
-            </text>
-            <text x="10" y="32" fill="var(--sw-fg-0)" font-size="10.5" font-family="var(--sw-mono)" :font-weight="n.id === focusedId ? 700 : 500">
-              {{ n.name.length > 24 ? n.name.slice(0, 22) + '…' : n.name }}
-            </text>
-            <text x="10" y="46" fill="var(--sw-fg-3)" font-size="9">
-              {{ n.serviceName.length > 24 ? n.serviceName.slice(0, 22) + '…' : n.serviceName }}
-            </text>
-            <!-- Metrics row: pulls the configured `center` + `secondary`
-                 metrics rather than hardcoded cpm/respTime. -->
+            <!-- Focus marker — small star bottom-right. Operator's
+                 mental cue: "this is the endpoint I clicked into",
+                 without sharing the orange halo with selection. -->
+            <g v-if="n.id === focusedId" :transform="`translate(${NW - 14}, ${NH - 14})`">
+              <circle r="8" fill="var(--sw-bg-0)" stroke="var(--sw-accent-line)" stroke-width="1" />
+              <text
+                text-anchor="middle"
+                y="3"
+                font-size="10"
+                font-weight="700"
+                fill="var(--sw-accent-2)"
+              >★</text>
+              <title>Focus endpoint</title>
+            </g>
+            <!-- Kind stripe removed — endpoint nodes don't carry a
+                 meaningful component classification (booster derives
+                 kind from service type which doesn't apply to plain
+                 HTTP endpoints). Border + focus star carry all the
+                 visual signal. -->
+            <!-- Row 1: full service name (small, fg-3 mono). -->
             <text
-              :x="NW - 8"
-              y="46"
-              text-anchor="end"
-              :fill="(() => {
-                const sla = nodeVal(n, ringDef);
-                return sla !== null && sla < 99 ? 'var(--sw-warn)' : 'var(--sw-fg-2)';
-              })()"
-              font-size="9"
+              x="12"
+              y="18"
+              fill="var(--sw-fg-3)"
+              font-size="10"
               font-family="var(--sw-mono)"
             >
-              {{ centerDef ? fmtMetric(nodeVal(n, centerDef)) : '' }}<tspan v-if="centerDef?.unit"> {{ centerDef.unit }}</tspan><tspan v-if="secondaryDef && nodeVal(n, secondaryDef) !== null"> · {{ fmtMetric(nodeVal(n, secondaryDef)) }}{{ secondaryDef.unit ? ' ' + secondaryDef.unit : '' }}</tspan>
+              <title>{{ n.serviceName }}</title>
+              {{ n.serviceName.length > 26 ? n.serviceName.slice(0, 24) + '…' : n.serviceName }}
             </text>
+            <!-- Row 2: API (endpoint) name — the headline. -->
+            <text
+              x="12"
+              y="38"
+              fill="var(--sw-fg-0)"
+              font-size="12"
+              font-family="var(--sw-mono)"
+              :font-weight="n.id === focusedId ? 700 : 600"
+            >
+              <title>{{ n.name }}</title>
+              {{ n.name.length > 28 ? n.name.slice(0, 26) + '…' : n.name }}
+            </text>
+            <!-- Row 3: configured `center` metric (typically RPM).
+                 Coloured in the ring band so the visual signal
+                 reinforces the border. -->
+            <text
+              x="12"
+              y="60"
+              :fill="centerDef && nodeVal(n, centerDef) !== null ? ringColor(n) : 'var(--sw-fg-3)'"
+              font-size="11.5"
+              font-family="var(--sw-mono)"
+              font-weight="700"
+            >
+              {{
+                centerDef
+                  ? (nodeVal(n, centerDef) === null
+                      ? `— ${(centerDef.unit ?? '').toUpperCase()}`
+                      : `${fmtMetric(nodeVal(n, centerDef))}${centerDef.unit ? ' ' + centerDef.unit.toUpperCase() : ''}`)
+                  : ''
+              }}<template v-if="secondaryDef && nodeVal(n, secondaryDef) !== null"><tspan fill="var(--sw-fg-3)"> · </tspan><tspan fill="var(--sw-fg-2)" font-weight="500">{{ fmtMetric(nodeVal(n, secondaryDef)) }}{{ secondaryDef.unit ? ' ' + secondaryDef.unit.toUpperCase() : '' }}</tspan></template>
+            </text>
+            <!-- Expand left (upstream) / right (downstream) buttons,
+                 visible on the SELECTED node so the operator can
+                 walk the chain without leaving the canvas. Already-
+                 expanded directions show a filled mark instead. -->
+            <g
+              v-if="selectedNodeId === n.id && n.id !== focusedId"
+              class="ep-expand"
+              :transform="`translate(-14, ${NH / 2 - 10})`"
+              @click.stop="expandNode(n, 'upstream')"
+            >
+              <circle r="10" cx="10" cy="10" fill="var(--sw-bg-0)" :stroke="hasExpansion(n, 'upstream') ? 'var(--sw-accent-2)' : 'var(--sw-line-2)'" stroke-width="1" />
+              <text x="10" y="13.5" text-anchor="middle" font-size="11" font-weight="700" :fill="hasExpansion(n, 'upstream') ? 'var(--sw-accent-2)' : 'var(--sw-fg-1)'">‹</text>
+              <title>Expand upstream callers</title>
+            </g>
+            <g
+              v-if="selectedNodeId === n.id && n.id !== focusedId"
+              class="ep-expand"
+              :transform="`translate(${NW - 6}, ${NH / 2 - 10})`"
+              @click.stop="expandNode(n, 'downstream')"
+            >
+              <circle r="10" cx="10" cy="10" fill="var(--sw-bg-0)" :stroke="hasExpansion(n, 'downstream') ? 'var(--sw-accent-2)' : 'var(--sw-line-2)'" stroke-width="1" />
+              <text x="10" y="13.5" text-anchor="middle" font-size="11" font-weight="700" :fill="hasExpansion(n, 'downstream') ? 'var(--sw-accent-2)' : 'var(--sw-fg-1)'">›</text>
+              <title>Expand downstream callees</title>
+            </g>
           </g>
         </svg>
 
           <div v-else-if="isLoading" class="loader">loading…</div>
           <div v-else class="loader">
             No dependency graph available for this endpoint in the last 15 minutes.
+          </div>
+        </div>
+
+        <!-- Legend strip at the bottom of the graph card — mirrors
+             the topology view's legend, with kind colour chips for
+             the left-stripe of each node + the call line treatment. -->
+        <div class="ep-legend">
+          <div v-if="ringDef" class="lg-block">
+            <span class="lg-lbl">{{ ringDef.label }}</span>
+            <span class="lg-band">
+              <span style="background: var(--sw-ok)" />
+              <span style="background: #fbbf24" />
+              <span style="background: var(--sw-warn)" />
+              <span style="background: var(--sw-err)" />
+            </span>
+          </div>
+          <div class="lg-block">
+            <span class="lg-lbl">Calls</span>
+            <span class="lg-aside">
+              thicker = heaviest (by {{ lineDef?.label ?? 'RPM' }})
+            </span>
+          </div>
+          <div class="lg-block">
+            <span class="lg-lbl">★</span>
+            <span class="lg-aside">Focus endpoint</span>
           </div>
         </div>
       </div>
@@ -708,10 +987,8 @@ function edgeSeries(c: EndpointDependencyCall, def: TopologyMetricDef): Array<nu
         <header class="ed-head">
           <div class="ed-id">
             <div class="ed-kind-row">
-              <span class="sw-tag" :style="{ background: 'rgba(168,85,247,0.12)', color: 'var(--sw-purple)' }">
-                {{ kindLabel(selectedNode) }}
-              </span>
               <span class="ed-svc">{{ selectedNode.serviceName }}</span>
+              <span v-if="selectedNode.id === focusedId" class="sw-tag accent">focus</span>
             </div>
             <div class="ed-name">{{ selectedNode.name }}</div>
           </div>
@@ -784,9 +1061,13 @@ function edgeSeries(c: EndpointDependencyCall, def: TopologyMetricDef): Array<nu
               class="ed-edge-row-card"
             >
               <div class="ed-edge-row-head">
-                <span class="ed-edge-row-label">
-                  {{ m.label }}<span v-if="m.unit" class="unit"> ({{ m.unit }})</span>
-                </span>
+                <span class="ed-edge-row-label">{{ formatEdgeRowLabel(m) }}</span>
+                <!-- Hover crosshair value at the bucket — server-side
+                     only so there's no diff column. -->
+                <span
+                  v-if="hoveredEdgeRowId === m.id && hoveredEdgeBucket !== null"
+                  class="ed-edge-tip"
+                >{{ fmtMetric(seriesAt(edgeSeries(selectedCall, m), hoveredEdgeBucket)) }}<template v-if="m.unit"> {{ m.unit.toUpperCase() }}</template></span>
                 <span class="ed-edge-row-num">{{ fmtMetric(edgeVal(selectedCall, m)) }}</span>
               </div>
               <Sparkline
@@ -794,6 +1075,10 @@ function edgeSeries(c: EndpointDependencyCall, def: TopologyMetricDef): Array<nu
                 color="var(--sw-accent)"
                 :height="38"
                 :stroke="1.4"
+                fluid
+                :crosshair-bucket="edgeRowCrosshair(m.id)"
+                @bucket-hover="(b: number) => onEdgeBucketHover(m.id, b)"
+                @bucket-leave="onEdgeBucketLeave"
               />
             </div>
           </div>
@@ -922,11 +1207,66 @@ function edgeSeries(c: EndpointDependencyCall, def: TopologyMetricDef): Array<nu
   font-size: 11.5px;
 }
 .ep-graph-card {
+  /* Height comes from the script's `cardHeightPx` computed — same
+     adapter as the topology card: 60% floor + 1100px cap, scaled by
+     the graph's actual content. The inline `style="height: …"` on
+     the section wins over this declaration. */
   padding: 0;
   display: grid;
   grid-template-columns: 1fr 320px;
-  height: 720px;
   overflow: hidden;
+}
+/* Legend strip at the bottom of the graph column. Sits inside
+   `.ep-graph` so it shares the card height with the SVG scroll. */
+.ep-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--sw-line);
+  background: var(--sw-bg-1);
+  flex: 0 0 auto;
+}
+.lg-block {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+}
+.lg-lbl {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--sw-fg-3);
+  font-weight: 700;
+}
+.lg-band {
+  display: inline-flex;
+  gap: 2px;
+}
+.lg-band span {
+  width: 18px;
+  height: 6px;
+  border-radius: 1px;
+  display: inline-block;
+}
+.lg-aside {
+  color: var(--sw-fg-2);
+  font-size: 10px;
+}
+.lg-kind-row {
+  display: inline-flex;
+  gap: 4px;
+}
+.kind-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--sw-bg-0);
+  border-radius: 2px;
 }
 .ep-graph {
   min-width: 0;
@@ -935,19 +1275,22 @@ function edgeSeries(c: EndpointDependencyCall, def: TopologyMetricDef): Array<nu
   overflow: hidden;
 }
 .ep-detail {
+  /* Whole-sidebar scroll. Each block sizes to its content (inbound /
+     outbound lists are dynamic) and overflows the parent if the
+     combined height exceeds the card. Mirrors the topology sidebar. */
   border-left: 1px solid var(--sw-line);
   background: var(--sw-bg-1);
-  overflow-y: auto;
   font-size: 11.5px;
-  display: grid;
-  grid-template-rows: 1fr 1fr;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
   min-height: 0;
 }
 .ep-detail-block {
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
-  min-height: 0;
+  flex: 0 0 auto;
+  overflow: visible;
 }
 .ep-detail-block + .ep-detail-block {
   border-top: 1px solid var(--sw-line);
@@ -960,9 +1303,8 @@ function edgeSeries(c: EndpointDependencyCall, def: TopologyMetricDef): Array<nu
   font-size: 11px;
   display: grid;
   place-items: center;
-}
-.ep-detail-empty + .ep-detail-empty {
-  border-top: 1px solid var(--sw-line);
+  min-height: 64px;
+  flex: 0 0 auto;
 }
 /* Edge-row line chart cards inside the endpoint-dep edge panel. */
 .ed-edge-rows {
@@ -975,6 +1317,24 @@ function edgeSeries(c: EndpointDependencyCall, def: TopologyMetricDef): Array<nu
   border: 1px solid var(--sw-line);
   border-radius: 4px;
   padding: 6px 8px;
+  min-width: 0;
+}
+.ed-edge-row-card :deep(.sparkline) {
+  display: block;
+  width: 100%;
+}
+.ed-edge-tip {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: baseline;
+  font-family: var(--sw-mono);
+  font-size: 10.5px;
+  padding: 1px 6px;
+  background: var(--sw-bg-0);
+  border: 1px solid var(--sw-line);
+  border-radius: 4px;
+  color: var(--sw-accent-2);
+  font-weight: 600;
 }
 .ed-edge-row-head {
   display: flex;

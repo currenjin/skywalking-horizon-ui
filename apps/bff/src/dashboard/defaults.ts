@@ -180,7 +180,7 @@ const GENERIC_WIDGETS: DashboardWidget[] = [
 
 /**
  * Resolve the default widget set for `(layerKey)`. First tries the
- * JSON layer template (`src/layers/config/<key>.json`); falls back to
+ * JSON layer template (`src/bundled_templates/layers/<key>.json`); falls back to
  * the hardcoded TS sets above when no JSON exists for the layer. JSON
  * wins because that's where operators will eventually edit widgets
  * via the admin page.

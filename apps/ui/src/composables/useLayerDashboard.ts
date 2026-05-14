@@ -29,6 +29,7 @@
 
 import { computed, type Ref } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
+import { useAutoRefreshSubscribe } from './useAutoRefreshSubscribe';
 import { bffClient } from '@/api/client';
 
 export function useLayerDashboardConfig(layerKey: Ref<string>, scope?: Ref<string>) {
@@ -38,6 +39,8 @@ export function useLayerDashboardConfig(layerKey: Ref<string>, scope?: Ref<strin
     enabled: computed(() => layerKey.value.length > 0),
     staleTime: 5 * 60_000,
   });
+  useAutoRefreshSubscribe(() => q.refetch());
+
   return {
     config: computed(() => q.data.value ?? null),
     isLoading: q.isLoading,

@@ -18,6 +18,7 @@
 import { RouterView } from 'vue-router';
 import AppSidebar from './AppSidebar.vue';
 import AppTopbar from './AppTopbar.vue';
+import TracePopout from '@/components/trace/TracePopout.vue';
 </script>
 
 <template>
@@ -27,5 +28,8 @@ import AppTopbar from './AppTopbar.vue';
     <main class="sw-main">
       <RouterView />
     </main>
+    <!-- Global trace-id popout: any page can call useTracePopout().openTrace(id)
+         and this modal renders the waterfall + span detail. -->
+    <TracePopout />
   </div>
 </template>

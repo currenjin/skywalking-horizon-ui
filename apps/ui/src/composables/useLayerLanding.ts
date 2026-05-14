@@ -17,6 +17,7 @@
 
 import { computed, type Ref } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
+import { useAutoRefreshSubscribe } from './useAutoRefreshSubscribe';
 import type { LandingConfig, LandingResponse, LayerDef } from '@skywalking-horizon-ui/api-client';
 import { bffClient } from '@/api/client';
 
@@ -53,6 +54,8 @@ export function useLayerLanding(
     refetchOnWindowFocus: true,
     retry: 1,
   });
+
+  useAutoRefreshSubscribe(() => q.refetch());
 
   const data = computed<LandingResponse | null>(() => q.data.value ?? null);
   const rows = computed(() => data.value?.rows ?? []);

@@ -20,7 +20,7 @@ import type { FetchLike } from '@skywalking-horizon-ui/api-client';
 import type { ConfigSource } from '../config/loader.js';
 import type { SessionStore } from '../auth/sessions.js';
 import { requireAuth } from '../auth/middleware.js';
-import { graphqlPost } from './graphql-client.js';
+import { buildOapOpts, graphqlPost } from './graphql-client.js';
 
 /**
  * One round-trip combining `version`, `getTimeInfo`, and `checkHealth`.
@@ -66,10 +66,7 @@ export function registerOapInfoRoute(app: FastifyInstance, deps: InfoRouteDeps):
     const cfg = deps.config.current;
     const statusUrl = cfg.oap.statusUrl;
     try {
-      const raw = await graphqlPost<InfoRaw>(
-        { statusUrl, timeoutMs: cfg.oap.timeoutMs, fetch: deps.fetch },
-        INFO_QUERY,
-      );
+      const raw = await graphqlPost<InfoRaw>(buildOapOpts(cfg, deps.fetch), INFO_QUERY);
       const body: OapInfo = {
         reachable: true,
         statusUrl,

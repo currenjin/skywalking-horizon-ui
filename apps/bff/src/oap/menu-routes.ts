@@ -26,7 +26,7 @@ import type {
 import type { ConfigSource } from '../config/loader.js';
 import type { SessionStore } from '../auth/sessions.js';
 import { requireAuth } from '../auth/middleware.js';
-import { graphqlPost } from './graphql-client.js';
+import { buildOapOpts, graphqlPost, type GraphqlOptions } from './graphql-client.js';
 import { getLayerTemplate, type LayerComponentFlags } from '../layers/loader.js';
 
 /**
@@ -212,7 +212,7 @@ function deriveLayer(
  */
 async function fetchCountsForLayers(
   layers: readonly string[],
-  opts: { statusUrl: string; timeoutMs: number; fetch?: FetchLike },
+  opts: GraphqlOptions,
 ): Promise<Map<string, number>> {
   const map = new Map<string, number>();
   if (layers.length === 0) return map;
@@ -238,7 +238,7 @@ export function registerMenuRoute(app: FastifyInstance, deps: MenuRouteDeps): vo
   app.get('/api/menu', { preHandler: auth }, async (_req: FastifyRequest, reply: FastifyReply) => {
     const cfg = deps.config.current;
     const statusUrl = cfg.oap.statusUrl;
-    const opts = { statusUrl, timeoutMs: cfg.oap.timeoutMs, fetch: deps.fetch };
+    const opts = buildOapOpts(cfg, deps.fetch);
     try {
       const raw = await graphqlPost<MenuRaw>(opts, MENU_QUERY);
 

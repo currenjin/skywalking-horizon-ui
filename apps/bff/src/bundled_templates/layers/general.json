@@ -32,21 +32,14 @@
   "overview": {
     "groups": [
       {
-        "title": "Throughput",
+        "title": "Latency & errors",
         "size": "auto",
         "metrics": [
           {
-            "id": "rpm",
-            "label": "RPM",
-            "tip": "Requests per minute across the layer.",
-            "mqe": "service_cpm",
-            "aggregation": "sum"
-          },
-          {
-            "id": "p99",
-            "label": "P99",
-            "tip": "99th-percentile response time across the layer.",
-            "mqe": "service_percentile{p='99'}",
+            "id": "p95",
+            "label": "P95",
+            "tip": "95th-percentile response time across the layer.",
+            "mqe": "service_percentile{p='95'}",
             "unit": "ms",
             "aggregation": "avg"
           },
@@ -923,5 +916,65 @@
     "traceProfiling": [],
     "ebpfProfiling": [],
     "asyncProfiling": []
+  },
+  "topology": {
+    "nodeMetrics": [
+      { "id": "cpm", "label": "RPM", "mqe": "service_cpm", "unit": "rpm", "role": "center", "aggregation": "avg" },
+      {
+        "id": "sla",
+        "label": "SLA",
+        "mqe": "service_sla/100",
+        "unit": "%",
+        "role": "ring",
+        "aggregation": "avg",
+        "thresholds": {
+          "invertHealth": true,
+          "invertBase": 100,
+          "ok": 0.1,
+          "warn": 1,
+          "danger": 5
+        }
+      },
+      { "id": "respTime", "label": "Latency", "mqe": "service_resp_time", "unit": "ms", "role": "secondary", "aggregation": "avg" }
+    ],
+    "linkServerMetrics": [
+      { "id": "cpm", "label": "RPM", "mqe": "service_relation_server_cpm", "unit": "rpm", "role": "lineServer", "aggregation": "avg" },
+      { "id": "respTime", "label": "Avg response time", "mqe": "service_relation_server_resp_time", "unit": "ms", "aggregation": "avg" },
+      { "id": "p95", "label": "p95", "mqe": "service_relation_server_percentile{p='95'}", "unit": "ms", "aggregation": "avg" },
+      { "id": "sla", "label": "SLA", "mqe": "service_relation_server_call_sla/100", "unit": "%", "aggregation": "avg" }
+    ],
+    "linkClientMetrics": [
+      { "id": "cpm", "label": "RPM", "mqe": "service_relation_client_cpm", "unit": "rpm", "role": "lineClient", "aggregation": "avg" },
+      { "id": "respTime", "label": "Avg response time", "mqe": "service_relation_client_resp_time", "unit": "ms", "aggregation": "avg" },
+      { "id": "p95", "label": "p95", "mqe": "service_relation_client_percentile{p='95'}", "unit": "ms", "aggregation": "avg" },
+      { "id": "sla", "label": "SLA", "mqe": "service_relation_client_call_sla/100", "unit": "%", "aggregation": "avg" }
+    ]
+  },
+  "endpointDependency": {
+    "nodeMetrics": [
+      { "id": "cpm", "label": "RPM", "mqe": "endpoint_cpm", "unit": "rpm", "role": "center", "aggregation": "avg" },
+      {
+        "id": "sla",
+        "label": "SLA",
+        "mqe": "endpoint_sla/100",
+        "unit": "%",
+        "role": "ring",
+        "aggregation": "avg",
+        "thresholds": {
+          "invertHealth": true,
+          "invertBase": 100,
+          "ok": 0.1,
+          "warn": 1,
+          "danger": 5
+        }
+      },
+      { "id": "respTime", "label": "Latency", "mqe": "endpoint_resp_time", "unit": "ms", "role": "secondary", "aggregation": "avg" }
+    ],
+    "linkMetrics": [
+      { "id": "cpm", "label": "RPM", "mqe": "endpoint_relation_cpm", "unit": "rpm", "role": "lineServer", "aggregation": "avg" },
+      { "id": "respTime", "label": "Avg response time", "mqe": "endpoint_relation_resp_time", "unit": "ms", "aggregation": "avg" },
+      { "id": "p95", "label": "p95", "mqe": "endpoint_relation_percentile{p='95'}", "unit": "ms", "aggregation": "avg" },
+      { "id": "sla", "label": "SLA", "mqe": "endpoint_relation_sla/100", "unit": "%", "aggregation": "avg" }
+    ]
   }
 }

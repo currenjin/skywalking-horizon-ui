@@ -1,0 +1,266 @@
+{
+  "key": "K8S",
+  "alias": "Kubernetes",
+  "color": "var(--sw-info)",
+  "documentLink": "https://skywalking.apache.org/docs/main/next/en/setup/backend/backend-k8s-monitoring/",
+  "aliases": {
+    "services": "Clusters",
+    "instances": "Nodes"
+  },
+  "components": {
+    "service": true,
+    "instances": true,
+    "endpoints": false,
+    "endpointDependency": false,
+    "topology": false,
+    "traces": false,
+    "logs": false
+  },
+  "layer-header": {
+    "orderBy": "pods",
+    "columns": [
+      { "metric": "pods", "label": "Pods", "mqe": "k8s_cluster_pod_total", "aggregation": "sum" },
+      { "metric": "nodes", "label": "Nodes", "mqe": "k8s_cluster_node_total", "aggregation": "sum" },
+      { "metric": "namespaces", "label": "Namespaces", "mqe": "k8s_cluster_namespace_total", "aggregation": "sum" },
+      { "metric": "deployments", "label": "Deployments", "mqe": "k8s_cluster_deployment_total", "aggregation": "sum" }
+    ]
+  },
+  "overview": {
+    "groups": [
+      {
+        "title": "Capacity",
+        "size": "auto",
+        "metrics": [
+          { "id": "pods", "label": "Pods", "tip": "Total pods reported across the cluster.", "mqe": "k8s_cluster_pod_total", "aggregation": "sum" },
+          { "id": "nodes", "label": "Nodes", "tip": "Node count.", "mqe": "k8s_cluster_node_total", "aggregation": "sum" },
+          { "id": "services", "label": "Services", "tip": "K8s Service objects.", "mqe": "k8s_cluster_service_total", "aggregation": "sum" }
+        ]
+      },
+      {
+        "title": "Trouble",
+        "size": "square",
+        "metrics": [
+          {
+            "id": "podsNotRunning",
+            "label": "Pods not running",
+            "tip": "Pods in any non-Running state — pending, failed, unknown.",
+            "mqe": "latest(k8s_cluster_pod_status_not_running)",
+            "aggregation": "sum"
+          }
+        ]
+      }
+    ]
+  },
+  "dashboards": {
+    "service": [
+      {
+        "id": "cpu_resources",
+        "title": "Cluster CPU Resources",
+        "tip": "Allocatable / capacity / requests / limits across the cluster (millicores).",
+        "type": "line",
+        "unit": "m",
+        "expressions": [
+          "k8s_cluster_cpu_cores",
+          "k8s_cluster_cpu_cores_allocatable",
+          "k8s_cluster_cpu_cores_requests",
+          "k8s_cluster_cpu_cores_limits"
+        ],
+        "expressionLabels": ["total", "allocatable", "requests", "limits"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "mem_resources",
+        "title": "Cluster Memory Resources",
+        "type": "line",
+        "unit": "Gi",
+        "expressions": [
+          "k8s_cluster_memory_total/1024/1024/1024",
+          "k8s_cluster_memory_allocatable/1024/1024/1024",
+          "k8s_cluster_memory_requests/1024/1024/1024",
+          "k8s_cluster_memory_limits/1024/1024/1024"
+        ],
+        "expressionLabels": ["total", "allocatable", "requests", "limits"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "storage_resources",
+        "title": "Cluster Storage Resources",
+        "type": "line",
+        "unit": "Gi",
+        "expressions": [
+          "k8s_cluster_storage_total/1024/1024/1024",
+          "k8s_cluster_storage_allocatable/1024/1024/1024"
+        ],
+        "expressionLabels": ["total", "allocatable"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "pod_totals",
+        "title": "Pod / Container Totals",
+        "type": "line",
+        "expressions": ["k8s_cluster_pod_total", "k8s_cluster_container_total"],
+        "expressionLabels": ["pods", "containers"],
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "deployment_replicas",
+        "title": "Deployment Replicas",
+        "tip": "Spec vs ready/status replica counts. Divergence indicates rollout issues.",
+        "type": "line",
+        "expressions": [
+          "latest(k8s_cluster_deployment_spec_replicas)",
+          "latest(k8s_cluster_deployment_status)"
+        ],
+        "expressionLabels": ["spec", "status"],
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "pod_waiting",
+        "title": "Pods Waiting",
+        "type": "line",
+        "expressions": ["latest(k8s_cluster_pod_status_waiting)"],
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "pod_not_running",
+        "title": "Pods Not Running",
+        "type": "line",
+        "expressions": ["latest(k8s_cluster_pod_status_not_running)"],
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "service_pod_status",
+        "title": "Service Pod Status",
+        "tip": "Aggregate health of pods backing K8s Service objects.",
+        "type": "line",
+        "expressions": ["latest(k8s_cluster_service_pod_status)"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "node_status",
+        "title": "Node Status",
+        "tip": "Sum of node Ready states.",
+        "type": "line",
+        "expressions": ["latest(k8s_cluster_node_status)"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "namespace_totals",
+        "title": "Workload Totals",
+        "tip": "Namespaces / deployments / statefulsets / daemonsets across the cluster.",
+        "type": "line",
+        "expressions": [
+          "latest(k8s_cluster_namespace_total)",
+          "latest(k8s_cluster_deployment_total)",
+          "latest(k8s_cluster_statefulset_total)",
+          "latest(k8s_cluster_daemonset_total)"
+        ],
+        "expressionLabels": ["namespaces", "deployments", "statefulsets", "daemonsets"],
+        "span": 4,
+        "rowSpan": 2
+      }
+    ],
+    "instance": [
+      {
+        "id": "node_status",
+        "title": "Node Status",
+        "type": "line",
+        "expressions": ["latest(k8s_node_node_status)"],
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "node_pod_total",
+        "title": "Pods on Node",
+        "type": "line",
+        "expressions": ["k8s_node_pod_total"],
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "node_cpu_usage",
+        "title": "Node CPU Usage",
+        "tip": "CPU usage in millicores.",
+        "type": "line",
+        "unit": "m",
+        "expressions": ["k8s_node_cpu_usage"],
+        "span": 6,
+        "rowSpan": 2
+      },
+      {
+        "id": "node_cpu_resources",
+        "title": "Node CPU Resources",
+        "type": "line",
+        "unit": "m",
+        "expressions": [
+          "k8s_node_cpu_cores",
+          "k8s_node_cpu_cores_allocatable",
+          "k8s_node_cpu_cores_requests",
+          "k8s_node_cpu_cores_limits"
+        ],
+        "expressionLabels": ["total", "allocatable", "requests", "limits"],
+        "span": 6,
+        "rowSpan": 2
+      },
+      {
+        "id": "node_memory_usage",
+        "title": "Node Memory Usage",
+        "type": "line",
+        "unit": "Gi",
+        "expressions": ["k8s_node_memory_usage/1024/1024/1024"],
+        "span": 6,
+        "rowSpan": 2
+      },
+      {
+        "id": "node_memory_resources",
+        "title": "Node Memory Resources",
+        "type": "line",
+        "unit": "Gi",
+        "expressions": [
+          "k8s_node_memory_total/1024/1024/1024",
+          "k8s_node_memory_allocatable/1024/1024/1024",
+          "k8s_node_memory_requests/1024/1024/1024",
+          "k8s_node_memory_limits/1024/1024/1024"
+        ],
+        "expressionLabels": ["total", "allocatable", "requests", "limits"],
+        "span": 6,
+        "rowSpan": 2
+      },
+      {
+        "id": "node_network_io",
+        "title": "Node Network I/O",
+        "type": "line",
+        "unit": "KB/s",
+        "expressions": [
+          "k8s_node_network_receive/1024",
+          "k8s_node_network_transmit/1024"
+        ],
+        "expressionLabels": ["receive", "transmit"],
+        "span": 6,
+        "rowSpan": 2
+      },
+      {
+        "id": "node_storage_resources",
+        "title": "Node Storage Resources",
+        "type": "line",
+        "unit": "Gi",
+        "expressions": [
+          "k8s_node_storage_total/1024/1024/1024",
+          "k8s_node_storage_allocatable/1024/1024/1024"
+        ],
+        "expressionLabels": ["total", "allocatable"],
+        "span": 6,
+        "rowSpan": 2
+      }
+    ]
+  }
+}

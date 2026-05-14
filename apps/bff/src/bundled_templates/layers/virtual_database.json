@@ -1,0 +1,101 @@
+{
+  "key": "VIRTUAL_DATABASE",
+  "alias": "Virtual Database",
+  "color": "var(--sw-warn)",
+  "documentLink": "https://skywalking.apache.org/docs/main/next/en/setup/service-agent/virtual-database/",
+  "aliases": {
+    "services": "Databases"
+  },
+  "components": {
+    "service": true,
+    "instances": false,
+    "endpoints": false,
+    "endpointDependency": false,
+    "topology": false,
+    "traces": false,
+    "logs": false
+  },
+  "layer-header": {
+    "orderBy": "cpm",
+    "columns": [
+      { "metric": "cpm", "label": "Access RPM", "unit": "rpm", "mqe": "database_access_cpm", "aggregation": "sum" },
+      { "metric": "respTime", "label": "Latency", "unit": "ms", "mqe": "database_access_resp_time", "aggregation": "avg" },
+      { "metric": "p95", "label": "p95", "unit": "ms", "mqe": "database_access_percentile{p='95'}", "aggregation": "avg" },
+      { "metric": "err", "label": "Error Rate", "unit": "%", "mqe": "100 - database_access_sla/100", "aggregation": "avg" }
+    ]
+  },
+  "overview": {
+    "groups": [
+      {
+        "title": "Latency & errors",
+        "size": "auto",
+        "metrics": [
+          { "id": "p95", "label": "P95", "tip": "95th-percentile database access latency.", "mqe": "database_access_percentile{p='95'}", "unit": "ms", "aggregation": "avg" },
+          { "id": "err", "label": "Error Rate", "tip": "100 − database access success rate. Driven by query exceptions captured by the calling service's agent.", "mqe": "100 - database_access_sla/100", "unit": "%", "aggregation": "avg" }
+        ]
+      },
+      {
+        "title": "Throughput",
+        "size": "square",
+        "metrics": [
+          { "id": "cpm", "label": "Access RPM", "tip": "Queries per minute against this virtual database.", "mqe": "database_access_cpm", "unit": "rpm", "aggregation": "sum" }
+        ]
+      }
+    ]
+  },
+  "dashboards": {
+    "service": [
+      {
+        "id": "traffic_line",
+        "title": "Access Traffic",
+        "tip": "Queries per minute against the virtual database.",
+        "type": "line",
+        "unit": "rpm",
+        "expressions": ["database_access_cpm"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "resp_time_line",
+        "title": "Avg Response Time",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["database_access_resp_time"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "sla_line",
+        "title": "Success Rate",
+        "tip": "Percentage of queries that returned without throwing.",
+        "type": "line",
+        "unit": "%",
+        "expressions": ["database_access_sla/100"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "percentile_line",
+        "title": "Response Time Percentile",
+        "tip": "p50 / p75 / p90 / p95 / p99 latency — the tail of the access-time distribution.",
+        "type": "line",
+        "unit": "ms",
+        "expressions": [
+          "relabels(database_access_percentile{p='50,75,90,95,99'},p='50,75,90,95,99',percentile='50,75,90,95,99')"
+        ],
+        "span": 12,
+        "rowSpan": 2
+      },
+      {
+        "id": "slow_statements",
+        "title": "Slow Statements",
+        "tip": "Top 20 slowest captured statements. Each row is a single statement execution — click to drill into the originating trace.",
+        "type": "record",
+        "unit": "ms",
+        "expressions": ["top_n(top_n_database_statement, 20, des)"],
+        "span": 12,
+        "rowSpan": 4
+      }
+    ]
+  }
+}

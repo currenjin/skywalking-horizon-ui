@@ -1,0 +1,472 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * Per-layer Traces feed.
+ *
+ *   POST /api/layer/:key/traces    — list
+ *   GET  /api/trace/:traceId       — detail by id (native or zipkin)
+ *
+ * The route is dual-source aware: when the layer's `traces.source`
+ * is `both` (default) or the operator explicitly asks for both via
+ * the query string, the BFF fans out to SkyWalking-native AND
+ * Zipkin in parallel and returns each backend's results on its own
+ * slot. The UI renders two tables side-by-side; there's no field
+ * mapping between the two — zipkin spans keep their zipkin shape.
+ *
+ * Native v2 vs v3 is auto-detected via {@link detectTraceProtocol}
+ * — the caller doesn't need to know which OAP version is answering.
+ */
+
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type {
+  FetchLike,
+  NativeSpan,
+  NativeTraceDetailResponse,
+  NativeTraceListResponse,
+  TraceDetailResponse,
+  TraceListResponse,
+  TraceQueryOrder,
+  TraceQueryState,
+  TraceSource,
+  TracesConfig,
+  ZipkinTraceDetailResponse,
+  ZipkinTraceListResponse,
+} from '@skywalking-horizon-ui/api-client';
+import type { ConfigSource } from '../config/loader.js';
+import type { SessionStore } from '../auth/sessions.js';
+import { requireAuth } from '../auth/middleware.js';
+import {  graphqlPost, buildOapOpts, type GraphqlOptions } from './graphql-client.js';
+import { getLayerTemplate, tracesConfigFor } from '../layers/loader.js';
+import { detectTraceProtocol } from './trace-protocol-cache.js';
+import { zipkinFetchTraces, zipkinFetchTraceById, summariseZipkinTrace } from './zipkin-client.js';
+
+export interface TraceRouteDeps {
+  config: ConfigSource;
+  sessions: SessionStore;
+  fetch?: FetchLike;
+}
+
+const DEFAULT_WINDOW_MIN = 30;
+const MAX_WINDOW_MIN = 60 * 24 * 7; // 1 week guard
+function fmtMinute(d: Date): string {
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const HH = String(d.getUTCHours()).padStart(2, '0');
+  const MM = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd} ${HH}${MM}`;
+}
+function rollingWindow(minutes: number): { start: string; end: string } {
+  const m = Math.max(1, Math.min(MAX_WINDOW_MIN, Math.round(minutes)));
+  const end = new Date();
+  const start = new Date(end.getTime() - m * 60_000);
+  return { start: fmtMinute(start), end: fmtMinute(end) };
+}
+function explicitWindow(startIso: string, endIso: string): { start: string; end: string } | null {
+  const s = new Date(startIso);
+  const e = new Date(endIso);
+  if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime()) || e.getTime() < s.getTime()) {
+    return null;
+  }
+  return { start: fmtMinute(s), end: fmtMinute(e) };
+}
+
+// ── Wire request shape ─────────────────────────────────────────────
+
+interface TraceListBody {
+  source?: TraceSource;
+  service?: string;
+  serviceId?: string;
+  instanceId?: string;
+  endpointId?: string;
+  traceId?: string;
+  traceState?: TraceQueryState;
+  queryOrder?: TraceQueryOrder;
+  minTraceDuration?: number;
+  maxTraceDuration?: number;
+  pageNum?: number;
+  pageSize?: number;
+  /** Free-form span tags (`http.status_code=500`, …). Matches OAP's
+   *  `TraceQueryCondition.tags: [KeyValue]`. */
+  tags?: Array<{ key: string; value: string }>;
+  /** Rolling window in minutes. Default 30; clamped to [1, 10080]. */
+  windowMinutes?: number;
+  /** Explicit ISO start (UTC). When both `start` and `end` are
+   *  provided they override `windowMinutes`. */
+  start?: string;
+  /** Explicit ISO end (UTC). Pair with `start`. */
+  end?: string;
+}
+
+// ── Native GraphQL queries ────────────────────────────────────────
+
+const LIST_SERVICES_FOR_RESOLVE = /* GraphQL */ `
+  query ListServicesForTrace($layer: String!) {
+    services: listServices(layer: $layer) {
+      id
+      name
+      normal
+    }
+  }
+`;
+
+const QUERY_BASIC_TRACES_V3 = /* GraphQL */ `
+  query QueryBasicTraces($condition: TraceQueryCondition) {
+    data: queryBasicTraces(condition: $condition) {
+      traces {
+        key: segmentId
+        endpointNames
+        duration
+        start
+        isError
+        traceIds
+      }
+    }
+  }
+`;
+
+const QUERY_TRACES_V2 = /* GraphQL */ `
+  query QueryTracesV2($condition: TraceQueryCondition) {
+    data: queryTraces(condition: $condition) {
+      traces {
+        spans {
+          traceId
+          segmentId
+          spanId
+          parentSpanId
+          refs { traceId parentSegmentId parentSpanId type }
+          serviceCode
+          serviceInstanceName
+          startTime
+          endTime
+          endpointName
+          type
+          peer
+          component
+          isError
+          layer
+          tags { key value }
+          logs { time data { key value } }
+          attachedEvents {
+            startTime { seconds nanos }
+            event
+            endTime { seconds nanos }
+            tags { key value }
+            summary { key value }
+          }
+        }
+      }
+    }
+  }
+`;
+
+const QUERY_TRACE_DETAIL = /* GraphQL */ `
+  query QueryTrace($traceId: ID!) {
+    trace: queryTrace(traceId: $traceId) {
+      spans {
+        traceId
+        segmentId
+        spanId
+        parentSpanId
+        refs { traceId parentSegmentId parentSpanId type }
+        serviceCode
+        serviceInstanceName
+        startTime
+        endTime
+        endpointName
+        type
+        peer
+        component
+        isError
+        layer
+        tags { key value }
+        logs { time data { key value } }
+        attachedEvents {
+          startTime { seconds nanos }
+          event
+          endTime { seconds nanos }
+          tags { key value }
+          summary { key value }
+        }
+      }
+    }
+  }
+`;
+
+// ── Helpers ────────────────────────────────────────────────────────
+
+async function resolveServiceId(
+  opts: GraphqlOptions,
+  layer: string,
+  serviceArg: string,
+): Promise<string | null> {
+  if (!serviceArg) return null;
+  // Ids contain `.`; names rarely do. Short-circuit when it's already
+  // an id.
+  if (serviceArg.includes('.') && !/\s/.test(serviceArg)) return serviceArg;
+  const data = await graphqlPost<{
+    services: Array<{ id: string; name: string }>;
+  }>(opts, LIST_SERVICES_FOR_RESOLVE, { layer: layer.toUpperCase() });
+  return (
+    data.services.find((s) => s.name === serviceArg)?.id ??
+    data.services.find((s) => s.id === serviceArg)?.id ??
+    null
+  );
+}
+
+function buildTraceCondition(body: TraceListBody, resolvedServiceId: string | null, w: { start: string; end: string }) {
+  return {
+    ...(resolvedServiceId ? { serviceId: resolvedServiceId } : {}),
+    ...(body.instanceId ? { serviceInstanceId: body.instanceId } : {}),
+    ...(body.endpointId ? { endpointId: body.endpointId } : {}),
+    ...(body.traceId ? { traceId: body.traceId } : {}),
+    ...(body.tags && body.tags.length > 0 ? { tags: body.tags } : {}),
+    ...(typeof body.minTraceDuration === 'number' ? { minTraceDuration: body.minTraceDuration } : {}),
+    ...(typeof body.maxTraceDuration === 'number' ? { maxTraceDuration: body.maxTraceDuration } : {}),
+    queryDuration: { start: w.start, end: w.end, step: 'MINUTE' },
+    traceState: (body.traceState ?? 'ALL') as TraceQueryState,
+    queryOrder: (body.queryOrder ?? 'BY_START_TIME') as TraceQueryOrder,
+    paging: {
+      pageNum: body.pageNum ?? 1,
+      pageSize: body.pageSize ?? 20,
+    },
+  };
+}
+
+async function fetchNativeList(
+  opts: GraphqlOptions,
+  body: TraceListBody,
+  layerKey: string,
+): Promise<NativeTraceListResponse> {
+  const protocol = await detectTraceProtocol(opts);
+  // Explicit start+end takes precedence over windowMinutes; falling
+  // back to the rolling default when the explicit range is invalid.
+  const explicit = body.start && body.end ? explicitWindow(body.start, body.end) : null;
+  const window = explicit ?? rollingWindow(body.windowMinutes ?? DEFAULT_WINDOW_MIN);
+  let serviceId: string | null = null;
+  try {
+    serviceId = body.serviceId
+      ? body.serviceId
+      : body.service
+        ? await resolveServiceId(opts, layerKey, body.service)
+        : null;
+  } catch (err) {
+    return {
+      source: 'native',
+      protocol,
+      traces: [],
+      reachable: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+  const condition = buildTraceCondition(body, serviceId, window);
+  try {
+    if (protocol === 'v2') {
+      const env = await graphqlPost<{
+        data: { traces: Array<{ spans: NativeSpan[] }> };
+      }>(opts, QUERY_TRACES_V2, { condition });
+      const traces = (env.data?.traces ?? []).map((t) => {
+        const root = t.spans.find((s) => s.parentSpanId === -1) ?? t.spans[0];
+        const ids = Array.from(new Set(t.spans.map((s) => s.traceId)));
+        return {
+          key: root?.segmentId ?? ids[0] ?? '',
+          segmentId: root?.segmentId ?? '',
+          endpointNames: root ? [root.endpointName] : [],
+          duration: root ? root.endTime - root.startTime : 0,
+          start: root ? String(root.startTime) : '',
+          isError: t.spans.some((s) => s.isError),
+          traceIds: ids,
+          spans: t.spans,
+        };
+      });
+      return { source: 'native', protocol, traces, reachable: true };
+    }
+    const env = await graphqlPost<{
+      data: {
+        traces: Array<{
+          key: string;
+          endpointNames: string[];
+          duration: number;
+          start: string;
+          isError: boolean;
+          traceIds: string[];
+        }>;
+      };
+    }>(opts, QUERY_BASIC_TRACES_V3, { condition });
+    const traces = (env.data?.traces ?? []).map((t) => ({
+      key: t.key,
+      segmentId: t.key,
+      endpointNames: t.endpointNames,
+      duration: t.duration,
+      start: t.start,
+      isError: t.isError,
+      traceIds: t.traceIds,
+    }));
+    return { source: 'native', protocol, traces, reachable: true };
+  } catch (err) {
+    return {
+      source: 'native',
+      protocol,
+      traces: [],
+      reachable: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+async function fetchZipkinList(
+  opts: GraphqlOptions,
+  body: TraceListBody,
+): Promise<ZipkinTraceListResponse> {
+  try {
+    const traces = await zipkinFetchTraces(opts, {
+      serviceName: body.service,
+      minDuration: body.minTraceDuration,
+      maxDuration: body.maxTraceDuration,
+      limit: body.pageSize ?? 20,
+    });
+    return { source: 'zipkin', traces, reachable: true };
+  } catch (err) {
+    return {
+      source: 'zipkin',
+      traces: [],
+      reachable: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+// ── Routes ─────────────────────────────────────────────────────────
+
+export function registerTraceRoutes(app: FastifyInstance, deps: TraceRouteDeps): void {
+  const auth = requireAuth(deps);
+
+  app.post(
+    '/api/layer/:key/traces',
+    { preHandler: auth },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const params = req.params as { key: string };
+      const layerKey = params.key;
+      if (!layerKey || !/^[a-z0-9_]+$/i.test(layerKey)) {
+        return reply.code(400).send({ error: 'invalid_layer_key' });
+      }
+      const body = (req.body ?? {}) as TraceListBody;
+      const template = getLayerTemplate(layerKey);
+      const tracesCfg: TracesConfig = tracesConfigFor(template);
+      const requestedSource: TraceSource = body.source ?? tracesCfg.source;
+      const opts = buildOapOpts(deps.config.current, deps.fetch);
+
+      const wantNative = requestedSource === 'both' || requestedSource === 'native';
+      const wantZipkin = requestedSource === 'both' || requestedSource === 'zipkin';
+      // Fan out in parallel; partial failures don't drop the whole
+      // response — the UI's empty / error states cover each slot.
+      const [native, zipkin] = await Promise.all([
+        wantNative ? fetchNativeList(opts, body, layerKey) : Promise.resolve(undefined),
+        wantZipkin ? fetchZipkinList(opts, body) : Promise.resolve(undefined),
+      ]);
+
+      const response: TraceListResponse = {
+        generatedAt: Date.now(),
+        source: requestedSource,
+        ...(native ? { native } : {}),
+        ...(zipkin ? { zipkin } : {}),
+      };
+      return reply.send(response);
+    },
+  );
+
+  app.get(
+    '/api/trace/:traceId',
+    { preHandler: auth },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const params = req.params as { traceId: string };
+      const q = req.query as { source?: 'native' | 'zipkin' };
+      const source: 'native' | 'zipkin' = q.source === 'zipkin' ? 'zipkin' : 'native';
+      const opts = buildOapOpts(deps.config.current, deps.fetch);
+
+      if (source === 'native') {
+        const protocol = await detectTraceProtocol(opts);
+        try {
+          const env = await graphqlPost<{ trace: { spans: NativeSpan[] } }>(
+            opts,
+            QUERY_TRACE_DETAIL,
+            { traceId: params.traceId },
+          );
+          const detail: NativeTraceDetailResponse = {
+            source: 'native',
+            protocol,
+            traceId: params.traceId,
+            spans: env.trace?.spans ?? [],
+            reachable: true,
+          };
+          return reply.send({
+            generatedAt: Date.now(),
+            source,
+            native: detail,
+          } satisfies TraceDetailResponse);
+        } catch (err) {
+          const detail: NativeTraceDetailResponse = {
+            source: 'native',
+            protocol,
+            traceId: params.traceId,
+            spans: [],
+            reachable: false,
+            error: err instanceof Error ? err.message : String(err),
+          };
+          return reply.send({
+            generatedAt: Date.now(),
+            source,
+            native: detail,
+          } satisfies TraceDetailResponse);
+        }
+      }
+      // Zipkin.
+      try {
+        const spans = await zipkinFetchTraceById(opts, params.traceId);
+        const detail: ZipkinTraceDetailResponse = {
+          source: 'zipkin',
+          traceId: params.traceId,
+          spans,
+          reachable: true,
+        };
+        return reply.send({
+          generatedAt: Date.now(),
+          source,
+          zipkin: detail,
+        } satisfies TraceDetailResponse);
+      } catch (err) {
+        const detail: ZipkinTraceDetailResponse = {
+          source: 'zipkin',
+          traceId: params.traceId,
+          spans: [],
+          reachable: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+        return reply.send({
+          generatedAt: Date.now(),
+          source,
+          zipkin: detail,
+        } satisfies TraceDetailResponse);
+      }
+    },
+  );
+}
+
+// Re-export the summariser so future callers can consume it; unused
+// here but useful for tests.
+export { summariseZipkinTrace };

@@ -119,6 +119,22 @@ export interface LandingConfig {
     metricIds: string[];
   }>;
   style: 'table' | 'bar' | 'mini-topology';
+  /**
+   * Per-user threshold overrides for topology + endpoint-dependency
+   * metrics. Keyed by `<scope>.<metricId>` where scope is
+   * `topology` or `dependency`. Merged on top of the template's
+   * default thresholds at render time.
+   */
+  thresholdOverrides?: Record<
+    string,
+    {
+      ok?: number;
+      warn?: number;
+      danger?: number;
+      invertHealth?: boolean;
+      invertBase?: number;
+    }
+  >;
 }
 
 export interface LayerConfig {

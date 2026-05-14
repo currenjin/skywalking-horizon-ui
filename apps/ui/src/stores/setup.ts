@@ -74,7 +74,7 @@ function defaultAggregationFor(metricKey: string): AggregationKind {
  * Build the initial LandingConfig for a layer. When the BFF
  * surfaces a `metrics` block from the JSON template, prefer it as the
  * source of truth — that's what the operator edits in
- * `apps/bff/src/layers/config/<layer>.json` / via the admin page.
+ * `apps/bff/src/bundled_templates/layers/<layer>.json` / via the admin page.
  * Falls back to the static metric-catalog defaults when no template
  * metrics arrived (e.g. layers without a JSON config file).
  */

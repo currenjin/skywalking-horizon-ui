@@ -60,7 +60,47 @@ export type {
   EndpointDependencyCall,
   EndpointDependencyResponse,
 } from './topology.js';
+export type {
+  TraceSource,
+  TracesConfig,
+  TraceKeyValue,
+  TraceLogEntry,
+  TraceAttachedEvent,
+  TraceAttachedEventTime,
+  TraceRef,
+  NativeSpan,
+  NativeTraceListRow,
+  NativeTraceListResponse,
+  NativeTraceDetailResponse,
+  TraceQueryOrder,
+  TraceQueryState,
+  ZipkinEndpoint,
+  ZipkinAnnotation,
+  ZipkinKind,
+  ZipkinSpan,
+  ZipkinTraceListRow,
+  ZipkinTraceListResponse,
+  ZipkinTraceDetailResponse,
+  TraceListResponse,
+  TraceDetailResponse,
+} from './trace.js';
+export type {
+  LogKeyValue,
+  LogRow,
+  LogTagFilter,
+  LogQueryRequest,
+  LogsResponse,
+  LogFacetsResponse,
+} from './logs.js';
 export type { OapInfo } from './oap-info.js';
+export type {
+  OverviewWidgetType,
+  OverviewWidget,
+  OverviewDashboard,
+  OverviewDashboardListResponse,
+  OverviewDashboardResponse,
+  OverviewWidgetResult,
+} from './overview.js';
 export { parseOapTimezoneMinutes } from './oap-info.js';
 export {
   RuntimeRuleClient,

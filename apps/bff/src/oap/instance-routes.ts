@@ -36,7 +36,7 @@ import type { ConfigSource } from '../config/loader.js';
 import type { SessionStore } from '../auth/sessions.js';
 import type { FetchLike } from '@skywalking-horizon-ui/api-client';
 import { requireAuth } from '../auth/middleware.js';
-import { graphqlPost } from './graphql-client.js';
+import {  graphqlPost, buildOapOpts } from './graphql-client.js';
 
 export interface InstanceRouteDeps {
   config: ConfigSource;
@@ -128,11 +128,7 @@ export function registerInstanceRoute(app: FastifyInstance, deps: InstanceRouteD
         return reply.code(400).send({ error: 'missing_service' });
       }
       const cfgCurrent = deps.config.current;
-      const opts = {
-        statusUrl: cfgCurrent.oap.statusUrl,
-        timeoutMs: cfgCurrent.oap.timeoutMs,
-        fetch: deps.fetch,
-      };
+      const opts = buildOapOpts(cfgCurrent, deps.fetch);
       const window = defaultWindow();
       // OAP-side ids look like base64-ish blobs (e.g. "Y2hlY2tvdXQ=.1");
       // names are plain words. If we don't see a `.` separator, treat

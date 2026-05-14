@@ -20,9 +20,9 @@
  * presentation (alias, color, slots, enabled components) AND its data
  * shape (landing card columns, dashboard widgets, MQE expressions).
  *
- * The bundled defaults live under `./config/<key>.json`, one file per
- * OAP layer enum. Operator overrides land in the SetupStore (JSON file
- * on disk) and merge on top.
+ * The bundled defaults live under `../bundled_templates/layers/<key>.json`,
+ * one file per OAP layer enum. Operator overrides land in the SetupStore
+ * (JSON file on disk) and merge on top.
  *
  * Lifting these from TS code into JSON gets us:
  *   - One file per layer to review or copy
@@ -41,9 +41,10 @@ import type {
   EndpointDependencyConfig,
   TopologyConfig,
   TopologyMetricDef,
+  TracesConfig,
 } from '@skywalking-horizon-ui/api-client';
 
-export type { TopologyConfig, EndpointDependencyConfig, TopologyMetricDef };
+export type { TopologyConfig, EndpointDependencyConfig, TopologyMetricDef, TracesConfig };
 
 export interface LayerComponentFlags {
   service?: boolean;
@@ -190,6 +191,12 @@ export interface LayerTemplate {
   /** API-dependency dashboard config — operator-editable node + edge MQE.
    *  When absent the loader fills it from {@link BOOSTER_ENDPOINT_DEP_DEFAULTS}. */
   endpointDependency?: EndpointDependencyConfig;
+  /** Traces tab config. The `source` field picks which trace backend
+   *  the UI's filter selector defaults to (`both` shows two parallel
+   *  tables; `native` / `zipkin` pin to one). Default `both` when
+   *  absent. The v2-vs-v3 split for native traces is decided at
+   *  runtime by probing `hasQueryTracesV2Support`, not in this config. */
+  traces?: TracesConfig;
 }
 
 /**
@@ -255,7 +262,11 @@ export const BOOSTER_ENDPOINT_DEP_DEFAULTS: EndpointDependencyConfig = {
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CONFIG_DIR = join(__dirname, 'config');
+// Bundled layer JSONs live alongside other static templates under
+// `apps/bff/src/bundled_templates/`. In the long run these should be
+// served by OAP; for now they ship inside the BFF so a fresh deploy
+// renders something sensible without any operator setup.
+const CONFIG_DIR = join(__dirname, '..', 'bundled_templates', 'layers');
 
 let cache: Map<string, LayerTemplate> | null = null;
 
@@ -454,6 +465,13 @@ export function endpointDependencyConfigFor(
 ): EndpointDependencyConfig {
   if (template?.endpointDependency) return template.endpointDependency;
   return BOOSTER_ENDPOINT_DEP_DEFAULTS;
+}
+
+/** Resolve the traces tab config. Defaults to surfacing both
+ *  SkyWalking-native and Zipkin trace lists side-by-side. */
+export function tracesConfigFor(template: LayerTemplate | null): TracesConfig {
+  if (template?.traces) return template.traces;
+  return { source: 'both' };
 }
 
 /**

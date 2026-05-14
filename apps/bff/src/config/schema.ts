@@ -32,6 +32,17 @@ const oapSchema = z
     // The OAP query/status host (GraphQL + /status/*).
     statusUrl: z.string().url().default('http://127.0.0.1:12800'),
     timeoutMs: z.number().int().positive().default(15000),
+    // Optional basic-auth credentials sent on every outbound OAP call
+    // (GraphQL, /status, /api/v2/* for Zipkin). The public demo host
+    // (`demo.skywalking.apache.org`) gates calls behind
+    // skywalking:skywalking — set both fields to use it.
+    auth: z
+      .object({
+        username: z.string().min(1),
+        password: z.string().min(1),
+      })
+      .strict()
+      .optional(),
     mqe: z
       .object({
         host: z.string().optional(),

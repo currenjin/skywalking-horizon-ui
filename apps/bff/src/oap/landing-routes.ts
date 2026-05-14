@@ -48,7 +48,7 @@ import type {
 import type { ConfigSource } from '../config/loader.js';
 import type { SessionStore } from '../auth/sessions.js';
 import { requireAuth } from '../auth/middleware.js';
-import { graphqlPost } from './graphql-client.js';
+import {  graphqlPost, buildOapOpts } from './graphql-client.js';
 import { expressionForServiceMetricSeries } from './mqe-catalog.js';
 
 export interface LandingRouteDeps {
@@ -270,11 +270,7 @@ export function registerLandingRoute(app: FastifyInstance, deps: LandingRouteDep
       const cfg = parsed.data;
       const oapLayer = layerKey.toUpperCase();
       const cfgCurrent = deps.config.current;
-      const opts = {
-        statusUrl: cfgCurrent.oap.statusUrl,
-        timeoutMs: cfgCurrent.oap.timeoutMs,
-        fetch: deps.fetch,
-      };
+      const opts = buildOapOpts(cfgCurrent, deps.fetch);
       const window = defaultWindow();
 
       // Step 1 — service list.

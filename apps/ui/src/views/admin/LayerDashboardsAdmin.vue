@@ -29,7 +29,13 @@
 <script setup lang="ts">
 import { computed, reactive, ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import type { AdminLayerTemplate } from '@/api/client';
-import type { DashboardScope, DashboardWidget } from '@skywalking-horizon-ui/api-client';
+import type {
+  DashboardScope,
+  DashboardWidget,
+  EndpointDependencyConfig,
+  TopologyConfig,
+  TopologyMetricDef,
+} from '@skywalking-horizon-ui/api-client';
 import { bffClient } from '@/api/client';
 import TimeChart from '@/components/charts/TimeChart.vue';
 import TopList from '@/components/charts/TopList.vue';
@@ -40,8 +46,10 @@ const SCOPES: DashboardScope[] = [
   'service',
   'instance',
   'endpoint',
-  'dependency',
+  // Topology before dependency — operator order request: service map
+  // is the primary canvas; API dependency drills into one endpoint.
   'topology',
+  'dependency',
   'trace',
   'logs',
   'traceProfiling',
@@ -119,9 +127,12 @@ const SCOPE_COMPONENT: Record<DashboardScope, ComponentKey> = {
   topology: 'topology',
   trace: 'traces',
   logs: 'logs',
-  traceProfiling: 'traceProfiling',
-  ebpfProfiling: 'ebpfProfiling',
-  asyncProfiling: 'asyncProfiling',
+  // Profiling scopes: each granular component flag controls one tab.
+  // The shared `profiling` flag (legacy) is implied true if any of the
+  // three are on — handled by the BFF loader.
+  traceProfiling: 'traceProfiling' as ComponentKey,
+  ebpfProfiling: 'ebpfProfiling' as ComponentKey,
+  asyncProfiling: 'asyncProfiling' as ComponentKey,
 };
 const visibleScopes = computed<DashboardScope[]>(() => {
   const tpl = draft.template;
@@ -426,6 +437,111 @@ function reset(): void {
 
 const selectedTpl = computed(() => draft.template);
 const currentWidgets = computed(() => widgetsFor(activeScope.value));
+
+/* ------------------------------------------------------------------- *
+ * Topology / Endpoint-dependency config editor.
+ *
+ * Topology has three metric lists: nodeMetrics, linkServerMetrics,
+ * linkClientMetrics. Endpoint-dependency only has two: nodeMetrics,
+ * linkMetrics (OAP has no client family for endpoint relations).
+ *
+ * Each list edits an array of TopologyMetricDef objects. The form
+ * surfaces id / label / mqe / unit / role / aggregation + thresholds.
+ *
+ * Initial state: when the template has no `topology` /
+ * `endpointDependency` block the helpers seed an empty one so the
+ * operator can start adding rows without manual JSON edits.
+ * ------------------------------------------------------------------- */
+
+const TOPOLOGY_ROLE_OPTIONS: Array<{ value: TopologyMetricDef['role'] | ''; label: string }> = [
+  { value: '', label: '(tooltip only)' },
+  { value: 'center', label: 'center · node big number' },
+  { value: 'ring', label: 'ring · node colour band' },
+  { value: 'secondary', label: 'secondary · detail panel' },
+  { value: 'lineServer', label: 'lineServer · edge server side' },
+  { value: 'lineClient', label: 'lineClient · edge client side' },
+];
+
+function emptyTopology(): TopologyConfig {
+  return { nodeMetrics: [], linkServerMetrics: [], linkClientMetrics: [] };
+}
+function emptyEndpointDep(): EndpointDependencyConfig {
+  return { nodeMetrics: [], linkMetrics: [] };
+}
+
+function ensureTopology(): TopologyConfig {
+  if (!draft.template) throw new Error('no template selected');
+  const tpl = draft.template;
+  if (!tpl.topology) tpl.topology = emptyTopology();
+  if (!tpl.topology.linkServerMetrics) tpl.topology.linkServerMetrics = [];
+  if (!tpl.topology.linkClientMetrics) tpl.topology.linkClientMetrics = [];
+  return tpl.topology;
+}
+function ensureEndpointDep(): EndpointDependencyConfig {
+  if (!draft.template) throw new Error('no template selected');
+  const tpl = draft.template;
+  if (!tpl.endpointDependency) tpl.endpointDependency = emptyEndpointDep();
+  if (!tpl.endpointDependency.linkMetrics) tpl.endpointDependency.linkMetrics = [];
+  return tpl.endpointDependency;
+}
+
+type MetricBucket = 'node' | 'linkServer' | 'linkClient' | 'link';
+
+function getMetricList(bucket: MetricBucket): TopologyMetricDef[] {
+  if (!draft.template) return [];
+  if (activeScope.value === 'topology') {
+    const t = ensureTopology();
+    if (bucket === 'node') return t.nodeMetrics;
+    if (bucket === 'linkServer') return t.linkServerMetrics ?? [];
+    if (bucket === 'linkClient') return t.linkClientMetrics ?? [];
+  } else if (activeScope.value === 'dependency') {
+    const t = ensureEndpointDep();
+    if (bucket === 'node') return t.nodeMetrics;
+    if (bucket === 'link') return t.linkMetrics ?? [];
+  }
+  return [];
+}
+
+function addMetric(bucket: MetricBucket): void {
+  if (!draft.template) return;
+  const list = getMetricList(bucket);
+  const next: TopologyMetricDef = {
+    id: `metric_${list.length + 1}`,
+    label: `Metric ${list.length + 1}`,
+    mqe: '',
+    unit: '',
+    aggregation: 'avg',
+  };
+  list.push(next);
+}
+function removeMetric(bucket: MetricBucket, i: number): void {
+  const list = getMetricList(bucket);
+  list.splice(i, 1);
+}
+function moveMetric(bucket: MetricBucket, i: number, dir: -1 | 1): void {
+  const list = getMetricList(bucket);
+  const j = i + dir;
+  if (j < 0 || j >= list.length) return;
+  [list[i], list[j]] = [list[j], list[i]];
+}
+function toggleThresholds(m: TopologyMetricDef): void {
+  if (m.thresholds) {
+    m.thresholds = undefined;
+  } else {
+    m.thresholds = { ok: 0.1, warn: 1, danger: 5 };
+  }
+}
+
+const topologyNodeMetrics = computed(() => getMetricList('node'));
+const topologyServerMetrics = computed(() => getMetricList('linkServer'));
+const topologyClientMetrics = computed(() => getMetricList('linkClient'));
+const epDepNodeMetrics = computed(() => activeScope.value === 'dependency' ? getMetricList('node') : []);
+const epDepLinkMetrics = computed(() => getMetricList('link'));
+
+/* Trace + Logs tabs have no per-layer config — only the
+ * enable/disable toggle in the Components block. The old
+ * `traces.source` field is gone; legacy JSONs with a `traces` block
+ * are ignored by the SPA. */
 
 /**
  * Metrics block editor — drives the service-list columns + default
@@ -778,7 +894,264 @@ function toggleComponent(key: ComponentKey): void {
              Drawer (right): config fields for the selected widget.
              Hidden when nothing is selected so the canvas gets the
              full width. -->
-        <section class="sw-card editor-card">
+        <!-- Topology + API dependency config editor — node + line
+             metric definitions, with optional 4-band thresholds.
+             Each metric edits id / label / MQE / unit / role /
+             aggregation; thresholds are a collapsible block. -->
+        <section
+          v-if="activeScope === 'topology'"
+          class="sw-card editor-card topo-cfg-card"
+        >
+          <div class="card-head">
+            <h4>Topology config</h4>
+            <span class="sub">node + server-side + client-side line metrics. Add rows; bind a metric to a visual role.</span>
+          </div>
+          <div class="topo-cfg-body">
+            <div class="topo-cfg-section">
+              <header class="topo-cfg-head">
+                <h5>Node metrics</h5>
+                <span class="sub">drives node center number + ring colour band</span>
+                <button class="sw-btn add" type="button" @click="addMetric('node')">＋ Add</button>
+              </header>
+              <div v-if="topologyNodeMetrics.length === 0" class="topo-cfg-empty">No node metrics. Click "+ Add" to start.</div>
+              <div v-else class="metric-list">
+                <article v-for="(m, i) in topologyNodeMetrics" :key="i" class="metric-row">
+                  <div class="metric-row-head">
+                    <label class="mf">
+                      <span>id</span>
+                      <input v-model="m.id" type="text" class="mf-input mono" />
+                    </label>
+                    <label class="mf">
+                      <span>label</span>
+                      <input v-model="m.label" type="text" class="mf-input" />
+                    </label>
+                    <label class="mf mf-wide">
+                      <span>MQE</span>
+                      <input v-model="m.mqe" type="text" class="mf-input mono" placeholder="service_cpm" />
+                    </label>
+                    <label class="mf mf-narrow">
+                      <span>unit</span>
+                      <input v-model="m.unit" type="text" class="mf-input" placeholder="rpm" />
+                    </label>
+                    <label class="mf">
+                      <span>role</span>
+                      <select v-model="m.role" class="mf-input">
+                        <option v-for="o in TOPOLOGY_ROLE_OPTIONS" :key="String(o.value)" :value="o.value || undefined">{{ o.label }}</option>
+                      </select>
+                    </label>
+                    <label class="mf mf-narrow">
+                      <span>agg</span>
+                      <select v-model="m.aggregation" class="mf-input">
+                        <option value="avg">avg</option>
+                        <option value="sum">sum</option>
+                      </select>
+                    </label>
+                    <div class="metric-row-actions">
+                      <button class="sw-btn small ghost" type="button" :disabled="i === 0" title="Move up" @click="moveMetric('node', i, -1)">↑</button>
+                      <button class="sw-btn small ghost" type="button" :disabled="i === topologyNodeMetrics.length - 1" title="Move down" @click="moveMetric('node', i, 1)">↓</button>
+                      <button class="sw-btn small ghost danger" type="button" title="Remove" @click="removeMetric('node', i)">×</button>
+                    </div>
+                  </div>
+                  <div class="metric-thresholds">
+                    <button class="sw-btn small ghost" type="button" @click="toggleThresholds(m)">
+                      {{ m.thresholds ? '− Thresholds' : '＋ Thresholds' }}
+                    </button>
+                    <template v-if="m.thresholds">
+                      <label class="mf mf-narrow"><span>ok ≤</span><input v-model.number="m.thresholds.ok" type="number" step="0.1" class="mf-input" /></label>
+                      <label class="mf mf-narrow"><span>warn ≤</span><input v-model.number="m.thresholds.warn" type="number" step="0.1" class="mf-input" /></label>
+                      <label class="mf mf-narrow"><span>danger ≤</span><input v-model.number="m.thresholds.danger" type="number" step="0.1" class="mf-input" /></label>
+                      <label class="mf mf-checkbox">
+                        <input v-model="m.thresholds.invertHealth" type="checkbox" />
+                        <span>invert (higher = better)</span>
+                      </label>
+                      <label v-if="m.thresholds.invertHealth" class="mf mf-narrow">
+                        <span>base</span>
+                        <input v-model.number="m.thresholds.invertBase" type="number" step="1" class="mf-input" placeholder="100" />
+                      </label>
+                    </template>
+                  </div>
+                </article>
+              </div>
+            </div>
+
+            <div class="topo-cfg-section">
+              <header class="topo-cfg-head">
+                <h5>Link · server-side metrics</h5>
+                <span class="sub">edge metrics queried as <code>service_relation_server_*</code></span>
+                <button class="sw-btn add" type="button" @click="addMetric('linkServer')">＋ Add</button>
+              </header>
+              <div v-if="topologyServerMetrics.length === 0" class="topo-cfg-empty">No server-side metrics.</div>
+              <div v-else class="metric-list">
+                <article v-for="(m, i) in topologyServerMetrics" :key="i" class="metric-row">
+                  <div class="metric-row-head">
+                    <label class="mf"><span>id</span><input v-model="m.id" type="text" class="mf-input mono" /></label>
+                    <label class="mf"><span>label</span><input v-model="m.label" type="text" class="mf-input" /></label>
+                    <label class="mf mf-wide"><span>MQE</span><input v-model="m.mqe" type="text" class="mf-input mono" /></label>
+                    <label class="mf mf-narrow"><span>unit</span><input v-model="m.unit" type="text" class="mf-input" /></label>
+                    <label class="mf mf-narrow"><span>agg</span>
+                      <select v-model="m.aggregation" class="mf-input">
+                        <option value="avg">avg</option>
+                        <option value="sum">sum</option>
+                      </select>
+                    </label>
+                    <div class="metric-row-actions">
+                      <button class="sw-btn small ghost" type="button" :disabled="i === 0" @click="moveMetric('linkServer', i, -1)">↑</button>
+                      <button class="sw-btn small ghost" type="button" :disabled="i === topologyServerMetrics.length - 1" @click="moveMetric('linkServer', i, 1)">↓</button>
+                      <button class="sw-btn small ghost danger" type="button" @click="removeMetric('linkServer', i)">×</button>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </div>
+
+            <div class="topo-cfg-section">
+              <header class="topo-cfg-head">
+                <h5>Link · client-side metrics</h5>
+                <span class="sub">edge metrics queried as <code>service_relation_client_*</code></span>
+                <button class="sw-btn add" type="button" @click="addMetric('linkClient')">＋ Add</button>
+              </header>
+              <div v-if="topologyClientMetrics.length === 0" class="topo-cfg-empty">No client-side metrics.</div>
+              <div v-else class="metric-list">
+                <article v-for="(m, i) in topologyClientMetrics" :key="i" class="metric-row">
+                  <div class="metric-row-head">
+                    <label class="mf"><span>id</span><input v-model="m.id" type="text" class="mf-input mono" /></label>
+                    <label class="mf"><span>label</span><input v-model="m.label" type="text" class="mf-input" /></label>
+                    <label class="mf mf-wide"><span>MQE</span><input v-model="m.mqe" type="text" class="mf-input mono" /></label>
+                    <label class="mf mf-narrow"><span>unit</span><input v-model="m.unit" type="text" class="mf-input" /></label>
+                    <label class="mf mf-narrow"><span>agg</span>
+                      <select v-model="m.aggregation" class="mf-input">
+                        <option value="avg">avg</option>
+                        <option value="sum">sum</option>
+                      </select>
+                    </label>
+                    <div class="metric-row-actions">
+                      <button class="sw-btn small ghost" type="button" :disabled="i === 0" @click="moveMetric('linkClient', i, -1)">↑</button>
+                      <button class="sw-btn small ghost" type="button" :disabled="i === topologyClientMetrics.length - 1" @click="moveMetric('linkClient', i, 1)">↓</button>
+                      <button class="sw-btn small ghost danger" type="button" @click="removeMetric('linkClient', i)">×</button>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section
+          v-else-if="activeScope === 'dependency'"
+          class="sw-card editor-card topo-cfg-card"
+        >
+          <div class="card-head">
+            <h4>API dependency config</h4>
+            <span class="sub">node + line metrics (server-side only — OAP has no endpoint client family).</span>
+          </div>
+          <div class="topo-cfg-body">
+            <div class="topo-cfg-section">
+              <header class="topo-cfg-head">
+                <h5>Node metrics</h5>
+                <span class="sub">drives endpoint box center number + SLA-coloured border</span>
+                <button class="sw-btn add" type="button" @click="addMetric('node')">＋ Add</button>
+              </header>
+              <div v-if="epDepNodeMetrics.length === 0" class="topo-cfg-empty">No node metrics.</div>
+              <div v-else class="metric-list">
+                <article v-for="(m, i) in epDepNodeMetrics" :key="i" class="metric-row">
+                  <div class="metric-row-head">
+                    <label class="mf"><span>id</span><input v-model="m.id" type="text" class="mf-input mono" /></label>
+                    <label class="mf"><span>label</span><input v-model="m.label" type="text" class="mf-input" /></label>
+                    <label class="mf mf-wide"><span>MQE</span><input v-model="m.mqe" type="text" class="mf-input mono" placeholder="endpoint_cpm" /></label>
+                    <label class="mf mf-narrow"><span>unit</span><input v-model="m.unit" type="text" class="mf-input" /></label>
+                    <label class="mf">
+                      <span>role</span>
+                      <select v-model="m.role" class="mf-input">
+                        <option v-for="o in TOPOLOGY_ROLE_OPTIONS" :key="String(o.value)" :value="o.value || undefined">{{ o.label }}</option>
+                      </select>
+                    </label>
+                    <label class="mf mf-narrow"><span>agg</span>
+                      <select v-model="m.aggregation" class="mf-input">
+                        <option value="avg">avg</option>
+                        <option value="sum">sum</option>
+                      </select>
+                    </label>
+                    <div class="metric-row-actions">
+                      <button class="sw-btn small ghost" type="button" :disabled="i === 0" @click="moveMetric('node', i, -1)">↑</button>
+                      <button class="sw-btn small ghost" type="button" :disabled="i === epDepNodeMetrics.length - 1" @click="moveMetric('node', i, 1)">↓</button>
+                      <button class="sw-btn small ghost danger" type="button" @click="removeMetric('node', i)">×</button>
+                    </div>
+                  </div>
+                  <div class="metric-thresholds">
+                    <button class="sw-btn small ghost" type="button" @click="toggleThresholds(m)">
+                      {{ m.thresholds ? '− Thresholds' : '＋ Thresholds' }}
+                    </button>
+                    <template v-if="m.thresholds">
+                      <label class="mf mf-narrow"><span>ok ≤</span><input v-model.number="m.thresholds.ok" type="number" step="0.1" class="mf-input" /></label>
+                      <label class="mf mf-narrow"><span>warn ≤</span><input v-model.number="m.thresholds.warn" type="number" step="0.1" class="mf-input" /></label>
+                      <label class="mf mf-narrow"><span>danger ≤</span><input v-model.number="m.thresholds.danger" type="number" step="0.1" class="mf-input" /></label>
+                      <label class="mf mf-checkbox">
+                        <input v-model="m.thresholds.invertHealth" type="checkbox" />
+                        <span>invert (higher = better)</span>
+                      </label>
+                      <label v-if="m.thresholds.invertHealth" class="mf mf-narrow">
+                        <span>base</span>
+                        <input v-model.number="m.thresholds.invertBase" type="number" step="1" class="mf-input" placeholder="100" />
+                      </label>
+                    </template>
+                  </div>
+                </article>
+              </div>
+            </div>
+
+            <div class="topo-cfg-section">
+              <header class="topo-cfg-head">
+                <h5>Link metrics (server-side)</h5>
+                <span class="sub">edge metrics queried as <code>endpoint_relation_*</code></span>
+                <button class="sw-btn add" type="button" @click="addMetric('link')">＋ Add</button>
+              </header>
+              <div v-if="epDepLinkMetrics.length === 0" class="topo-cfg-empty">No link metrics.</div>
+              <div v-else class="metric-list">
+                <article v-for="(m, i) in epDepLinkMetrics" :key="i" class="metric-row">
+                  <div class="metric-row-head">
+                    <label class="mf"><span>id</span><input v-model="m.id" type="text" class="mf-input mono" /></label>
+                    <label class="mf"><span>label</span><input v-model="m.label" type="text" class="mf-input" /></label>
+                    <label class="mf mf-wide"><span>MQE</span><input v-model="m.mqe" type="text" class="mf-input mono" /></label>
+                    <label class="mf mf-narrow"><span>unit</span><input v-model="m.unit" type="text" class="mf-input" /></label>
+                    <label class="mf mf-narrow"><span>agg</span>
+                      <select v-model="m.aggregation" class="mf-input">
+                        <option value="avg">avg</option>
+                        <option value="sum">sum</option>
+                      </select>
+                    </label>
+                    <div class="metric-row-actions">
+                      <button class="sw-btn small ghost" type="button" :disabled="i === 0" @click="moveMetric('link', i, -1)">↑</button>
+                      <button class="sw-btn small ghost" type="button" :disabled="i === epDepLinkMetrics.length - 1" @click="moveMetric('link', i, 1)">↓</button>
+                      <button class="sw-btn small ghost danger" type="button" @click="removeMetric('link', i)">×</button>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Trace + Logs are built-in views with no per-layer config
+             other than enable/disable, which is already handled via
+             the Components toggle in the right sidebar. -->
+        <section
+          v-else-if="activeScope === 'trace' || activeScope === 'logs'"
+          class="sw-card editor-card topo-cfg-card"
+        >
+          <div class="card-head">
+            <h4>{{ SCOPE_LABELS[activeScope] }} tab</h4>
+            <span class="sub">No per-layer config required — toggle visibility via Components in the right sidebar.</span>
+          </div>
+          <div class="topo-cfg-body">
+            <p class="topo-cfg-help">
+              The <b>{{ SCOPE_LABELS[activeScope] }}</b> tab is a built-in view that uses
+              SkyWalking-native query-protocol APIs directly. Operators configure filters
+              and time range at runtime from the page itself; nothing to wire up here.
+            </p>
+          </div>
+        </section>
+
+        <section v-else class="sw-card editor-card">
           <div class="card-head">
             <h4>{{ SCOPE_LABELS[activeScope] }} widgets</h4>
             <span class="sub">
@@ -1444,6 +1817,161 @@ function toggleComponent(key: ComponentKey): void {
 }
 
 .editor-card { padding: 0; }
+/* Topology / endpoint-dep config preview — read-only JSON view. */
+.topo-cfg-body { padding: 12px 14px 16px; }
+.topo-cfg-help {
+  margin: 0 0 10px;
+  font-size: 11.5px;
+  color: var(--sw-fg-3);
+  line-height: 1.5;
+}
+.topo-cfg-help code {
+  font-family: var(--sw-mono);
+  color: var(--sw-fg-1);
+  background: var(--sw-bg-2);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.topo-cfg-json {
+  margin: 0;
+  padding: 12px;
+  background: var(--sw-bg-2);
+  border: 1px solid var(--sw-line);
+  border-radius: 6px;
+  font-family: var(--sw-mono);
+  font-size: 11.5px;
+  color: var(--sw-fg-1);
+  line-height: 1.55;
+  overflow-x: auto;
+  white-space: pre;
+  max-height: 540px;
+}
+/* Topology / endpoint-dep form editor */
+.topo-cfg-card .topo-cfg-body { padding: 4px 0 0; }
+.topo-cfg-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--sw-line);
+}
+.topo-cfg-section:last-child { border-bottom: none; }
+.topo-cfg-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.topo-cfg-head h5 {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--sw-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.topo-cfg-head .sub {
+  font-size: 10.5px;
+  color: var(--sw-fg-3);
+  flex: 1;
+}
+.topo-cfg-head .sub code {
+  font-family: var(--sw-mono);
+  color: var(--sw-fg-1);
+  background: var(--sw-bg-2);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+.topo-cfg-head .sw-btn.add {
+  background: var(--sw-accent);
+  color: var(--sw-bg-0);
+  border: none;
+  height: 24px;
+  padding: 0 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.topo-cfg-empty {
+  font-size: 11.5px;
+  color: var(--sw-fg-3);
+  padding: 12px;
+  text-align: center;
+  background: var(--sw-bg-2);
+  border-radius: 4px;
+}
+.metric-list { display: flex; flex-direction: column; gap: 8px; }
+.metric-row {
+  background: var(--sw-bg-1);
+  border: 1px solid var(--sw-line);
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+.metric-row-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.metric-row-actions {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+  align-self: flex-end;
+}
+.metric-thresholds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--sw-line);
+}
+.mf {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--sw-fg-3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  min-width: 110px;
+}
+.mf.mf-wide { min-width: 220px; flex: 1; }
+.mf.mf-narrow { min-width: 80px; }
+.mf.mf-checkbox {
+  flex-direction: row;
+  align-items: center;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 10.5px;
+  color: var(--sw-fg-2);
+  min-width: auto;
+}
+.mf.mf-checkbox input { accent-color: var(--sw-accent); }
+.mf-input {
+  height: 26px;
+  padding: 0 6px;
+  background: var(--sw-bg-2);
+  border: 1px solid var(--sw-line-2);
+  border-radius: 4px;
+  color: var(--sw-fg-0);
+  font: inherit;
+  font-size: 11px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.mf-input.mono { font-family: var(--sw-mono); }
+.sw-btn.small.ghost {
+  background: transparent;
+  border: 1px solid var(--sw-line-2);
+  color: var(--sw-fg-2);
+  height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.sw-btn.small.ghost.danger { color: var(--sw-err); border-color: rgba(239, 68, 68, 0.3); }
+.sw-btn.small.ghost[disabled] { opacity: 0.4; cursor: not-allowed; }
 .card-head {
   display: flex;
   align-items: baseline;

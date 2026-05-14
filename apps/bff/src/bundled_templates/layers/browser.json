@@ -1,0 +1,244 @@
+{
+  "key": "BROWSER",
+  "alias": "Browser",
+  "color": "var(--sw-cyan)",
+  "documentLink": "https://skywalking.apache.org/docs/main/next/en/setup/service-agent/browser-agent/",
+  "aliases": {
+    "services": "Apps",
+    "instances": "Versions",
+    "endpoints": "Pages"
+  },
+  "components": {
+    "service": true,
+    "instances": true,
+    "endpoints": true,
+    "topology": false,
+    "traces": true,
+    "logs": true
+  },
+  "layer-header": {
+    "orderBy": "pv",
+    "columns": [
+      { "metric": "pv", "label": "Page Views", "unit": "/min", "mqe": "browser_app_pv", "aggregation": "sum" },
+      { "metric": "errorRate", "label": "Error Rate", "unit": "%", "mqe": "browser_app_error_rate/100", "aggregation": "avg" },
+      { "metric": "errorSum", "label": "Errors", "mqe": "browser_app_error_sum", "aggregation": "sum" }
+    ]
+  },
+  "overview": {
+    "groups": [
+      {
+        "title": "Page health",
+        "size": "auto",
+        "metrics": [
+          { "id": "fmp_p95", "label": "FMP P95", "tip": "95th-percentile first-meaningful-paint latency across the app.", "mqe": "browser_app_page_fmp_percentile{p='95'}", "unit": "ms", "aggregation": "avg" },
+          { "id": "errorRate", "label": "Error Rate", "tip": "Percentage of page loads that produced an error.", "mqe": "browser_app_error_rate/100", "unit": "%", "aggregation": "avg" }
+        ]
+      },
+      {
+        "title": "Throughput",
+        "size": "square",
+        "metrics": [
+          { "id": "pv", "label": "PV / min", "tip": "Page views per minute.", "mqe": "browser_app_pv", "unit": "/min", "aggregation": "sum" }
+        ]
+      }
+    ]
+  },
+  "dashboards": {
+    "service": [
+      {
+        "id": "app_pv",
+        "title": "App Load (PV)",
+        "type": "line",
+        "unit": "/min",
+        "expressions": ["browser_app_pv"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "app_error_rate",
+        "title": "App Error Rate",
+        "type": "line",
+        "unit": "%",
+        "expressions": ["browser_app_error_rate/100"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "app_error_sum",
+        "title": "App Error Count",
+        "type": "line",
+        "expressions": ["browser_app_error_sum"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "top_pages_pv",
+        "title": "Top Hot Pages",
+        "tip": "Pages ranked by page views, errors, and error rate.",
+        "type": "top",
+        "expressions": [
+          "top_n(browser_app_page_pv,10,des)",
+          "top_n(browser_app_page_error_sum,10,des)",
+          "top_n(browser_app_page_error_rate,10,des)/100"
+        ],
+        "expressionLabels": ["PV", "Errors", "Error Rate"],
+        "expressionUnits": ["/min", "", "%"],
+        "span": 6,
+        "rowSpan": 3
+      },
+      {
+        "id": "top_versions",
+        "title": "Top Versions",
+        "tip": "App version breakdown — load + errors + error rate.",
+        "type": "top",
+        "expressions": [
+          "top_n(browser_app_single_version_pv,10,des)",
+          "top_n(browser_app_single_version_error_sum,10,des)",
+          "top_n(browser_app_single_version_error_rate,10,des)/100"
+        ],
+        "expressionLabels": ["PV", "Errors", "Error Rate"],
+        "expressionUnits": ["/min", "", "%"],
+        "span": 6,
+        "rowSpan": 3
+      }
+    ],
+    "instance": [
+      {
+        "id": "ver_pv",
+        "title": "Version PV",
+        "type": "line",
+        "unit": "/min",
+        "expressions": ["browser_app_single_version_pv"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "ver_error_rate",
+        "title": "Version Error Rate",
+        "type": "line",
+        "unit": "%",
+        "expressions": ["browser_app_single_version_error_rate/100"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "ver_error_sum",
+        "title": "Version Error Count",
+        "type": "line",
+        "expressions": ["browser_app_single_version_error_sum"],
+        "span": 4,
+        "rowSpan": 2
+      }
+    ],
+    "endpoint": [
+      {
+        "id": "page_fmp_percentile",
+        "title": "First Meaningful Paint Percentile",
+        "tip": "p50–p99 of FMP latency for the selected page. Below 1s for p75 is a common target.",
+        "type": "line",
+        "unit": "ms",
+        "expressions": [
+          "relabels(browser_app_page_fmp_percentile{p='50,75,90,95,99'},p='50,75,90,95,99',percentile='50,75,90,95,99')"
+        ],
+        "span": 6,
+        "rowSpan": 2
+      },
+      {
+        "id": "page_load_percentile",
+        "title": "Page Load Percentile",
+        "type": "line",
+        "unit": "ms",
+        "expressions": [
+          "relabels(browser_app_page_load_page_percentile{p='50,75,90,95,99'},p='50,75,90,95,99',percentile='50,75,90,95,99')"
+        ],
+        "span": 6,
+        "rowSpan": 2
+      },
+      {
+        "id": "page_ttl_percentile",
+        "title": "Time-to-Live Percentile",
+        "type": "line",
+        "unit": "ms",
+        "expressions": [
+          "relabels(browser_app_page_ttl_percentile{p='50,75,90,95,99'},p='50,75,90,95,99',percentile='50,75,90,95,99')"
+        ],
+        "span": 6,
+        "rowSpan": 2
+      },
+      {
+        "id": "page_first_pack_percentile",
+        "title": "First Pack Latency Percentile",
+        "type": "line",
+        "unit": "ms",
+        "expressions": [
+          "relabels(browser_app_page_first_pack_percentile{p='50,75,90,95,99'},p='50,75,90,95,99',percentile='50,75,90,95,99')"
+        ],
+        "span": 6,
+        "rowSpan": 2
+      },
+      {
+        "id": "page_performance",
+        "title": "Page Performance Breakdown",
+        "tip": "Avg time spent in each phase of page load — resolve, redirect, DNS, TCP, TTFB, transfer, DOM analysis, DOM ready, FPT, full load.",
+        "type": "line",
+        "unit": "ms",
+        "expressions": [
+          "browser_app_page_dns_avg",
+          "browser_app_page_redirect_avg",
+          "browser_app_page_tcp_avg",
+          "browser_app_page_ttfb_avg",
+          "browser_app_page_trans_avg",
+          "browser_app_page_dom_analysis_avg",
+          "browser_app_page_dom_ready_avg",
+          "browser_app_page_fpt_avg",
+          "browser_app_page_load_page_avg",
+          "browser_app_page_res_avg"
+        ],
+        "expressionLabels": ["dns", "redirect", "tcp", "ttfb", "transfer", "dom analysis", "dom ready", "fpt", "load", "resource"],
+        "span": 12,
+        "rowSpan": 3
+      },
+      {
+        "id": "page_error_breakdown",
+        "title": "Page Errors by Type",
+        "tip": "Resource / JS / AJAX / unknown error counters per minute.",
+        "type": "line",
+        "expressions": [
+          "browser_app_page_resource_error_sum",
+          "browser_app_page_js_error_sum",
+          "browser_app_page_ajax_error_sum",
+          "browser_app_page_unknown_error_sum"
+        ],
+        "expressionLabels": ["resource", "js", "ajax", "unknown"],
+        "span": 6,
+        "rowSpan": 2
+      },
+      {
+        "id": "web_vitals",
+        "title": "Web Vitals",
+        "tip": "Core Web Vitals — FMP, LCP, CLS (avg per minute). CLS is divided by 1000 to bring it into the typical 0–1 score range.",
+        "type": "line",
+        "expressions": [
+          "browser_app_web_vitals_fmp_avg",
+          "browser_app_web_vitals_lcp_avg",
+          "browser_app_web_vitals_cls_avg / 1000"
+        ],
+        "expressionLabels": ["FMP (ms)", "LCP (ms)", "CLS"],
+        "span": 6,
+        "rowSpan": 2
+      },
+      {
+        "id": "inp_percentile",
+        "title": "Interaction to Next Paint Percentile",
+        "tip": "INP — responsiveness metric replacing FID.",
+        "type": "line",
+        "unit": "ms",
+        "expressions": [
+          "relabels(browser_app_web_interaction_inp_percentile{p='50,75,90,95,99'},p='50,75,90,95,99',percentile='50,75,90,95,99')"
+        ],
+        "span": 12,
+        "rowSpan": 2
+      }
+    ]
+  }
+}

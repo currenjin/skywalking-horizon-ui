@@ -40,7 +40,7 @@ import type {
   TopologyMetricDef,
 } from '@skywalking-horizon-ui/api-client';
 import { requireAuth } from '../auth/middleware.js';
-import { graphqlPost } from './graphql-client.js';
+import {  graphqlPost, buildOapOpts } from './graphql-client.js';
 import { endpointDependencyConfigFor, getLayerTemplate } from '../layers/loader.js';
 
 export interface EndpointDependencyRouteDeps {
@@ -265,11 +265,7 @@ export function registerEndpointDependencyRoute(
       const epCfg: EndpointDependencyConfig = endpointDependencyConfigFor(template);
 
       const cfgCurrent = deps.config.current;
-      const opts = {
-        statusUrl: cfgCurrent.oap.statusUrl,
-        timeoutMs: cfgCurrent.oap.timeoutMs,
-        fetch: deps.fetch,
-      };
+      const opts = buildOapOpts(cfgCurrent, deps.fetch);
       const window = defaultWindow();
       const oapLayer = layerKey.toUpperCase();
       const durationVar = { start: window.start, end: window.end, step: 'MINUTE' };
@@ -399,22 +395,38 @@ export function registerEndpointDependencyRoute(
       }
 
       // ── Per-edge MQE under EndpointRelation. We also capture the
-      // per-bucket series so the UI's edge sidebar can draw sparklines
-      // instead of just printing scalars.
+      // per-bucket series so the UI's edge sidebar can draw sparklines.
+      //
+      // Endpoint relation metrics are SERVER-SIDE only (OAP has no
+      // `endpoint_relation_client_*` family) — they live on the
+      // callee that records the incoming call. So an edge is
+      // queryable when the DEST endpoint is real + named, regardless
+      // of whether the source is real (e.g. `User → consumer` edges
+      // still produce server-side numbers). When the source is
+      // virtual we use a synthetic source service name and
+      // `sourceNormal: false`, which is what booster does too.
       const linkMetrics = epCfg.linkMetrics ?? [];
       const edgeMetricVals = new Map<string, Record<string, number | null>>();
       const edgeMetricSeries = new Map<string, Record<string, Array<number | null> | null>>();
       const realEndpointMap = new Map(realNodes.map((n) => [n.id, n]));
-      const realEdges = graph.calls.filter(
-        (c) => realEndpointMap.has(c.source) && realEndpointMap.has(c.target),
-      );
-      if (realEdges.length > 0 && linkMetrics.length > 0) {
+      const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
+      const candidateEdges = graph.calls.filter((c) => {
+        const dst = nodeById.get(c.target);
+        return !!dst && dst.isReal && !!dst.name && !!dst.serviceName;
+      });
+      if (candidateEdges.length > 0 && linkMetrics.length > 0) {
         const fragments: string[] = [];
         const aliasMap = new Map<string, { callId: string; metric: TopologyMetricDef }>();
-        realEdges.forEach((c, i) => {
-          const src = realEndpointMap.get(c.source)!;
-          const dst = realEndpointMap.get(c.target)!;
-          const srcNormal = src.serviceId === serviceId ? normal : true;
+        candidateEdges.forEach((c, i) => {
+          const dst = realEndpointMap.get(c.target) ?? nodeById.get(c.target)!;
+          const src = nodeById.get(c.source);
+          // Source may be a synthetic node (`User`, `localhost:-1`).
+          // Booster's pattern: pass the source's name + serviceName
+          // through, and set `sourceNormal = isReal`. OAP accepts
+          // virtual sources for endpoint-relation queries.
+          const srcName = src?.name || 'User';
+          const srcServiceName = src?.serviceName || 'User';
+          const srcNormal = src ? src.isReal : false;
           const dstNormal = dst.serviceId === serviceId ? normal : true;
           linkMetrics.forEach((m, j) => {
             const alias = `r${i}_${j}`;
@@ -423,8 +435,8 @@ export function registerEndpointDependencyRoute(
               endpointRelationFragment(
                 alias,
                 m,
-                src.serviceName,
-                src.name,
+                srcServiceName,
+                srcName,
                 srcNormal,
                 dst.serviceName,
                 dst.name,

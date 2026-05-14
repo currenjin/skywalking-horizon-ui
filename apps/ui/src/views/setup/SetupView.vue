@@ -63,7 +63,7 @@ async function onDiscard(): Promise<void> {
 const orderedLayers = useLandingOrder(layers);
 
 /** Only layers with a dashboard template (overview tile or per-layer
- *  header columns loaded from `apps/bff/src/layers/config/<key>.json`)
+ *  header columns loaded from `apps/bff/src/bundled_templates/layers/<key>.json`)
  *  belong on this page. Detected-but-undefined layers have nothing to
  *  configure here — they'd render as empty cards. Already ordered by
  *  priority (lowest first) via `useLandingOrder`. */
@@ -165,7 +165,7 @@ const mode = ref<Mode>('config');
         <p>
           Setup only lists layers with a dashboard template (an
           <code>overview.metrics</code> or <code>layer-header.columns</code> block in
-          <code>apps/bff/src/layers/config/&lt;key&gt;.json</code>). Define one, or edit a
+          <code>apps/bff/src/bundled_templates/layers/&lt;key&gt;.json</code>). Define one, or edit a
           loaded template under /admin/layer-dashboards.
         </p>
       </div>

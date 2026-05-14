@@ -19,14 +19,25 @@ import type {
   DashboardConfig,
   DashboardResponse,
   DashboardWidget,
+  EndpointDependencyConfig,
   EndpointDependencyResponse,
   LandingConfig,
   LandingResponse,
+  LogFacetsResponse,
+  LogQueryRequest,
+  LogsResponse,
   MenuResponse,
   OapInfo,
   SetupResponse,
   SetupSavePayload,
+  TopologyConfig,
   TopologyResponse,
+  TraceDetailResponse,
+  TraceListResponse,
+  TraceQueryOrder,
+  TraceQueryState,
+  TraceSource,
+  TracesConfig,
 } from '@skywalking-horizon-ui/api-client';
 
 export type {
@@ -55,6 +66,33 @@ export type {
   EndpointDependencyNode,
   EndpointDependencyCall,
   EndpointDependencyResponse,
+  TraceSource,
+  TracesConfig,
+  TraceKeyValue,
+  TraceLogEntry,
+  TraceAttachedEvent,
+  TraceRef,
+  NativeSpan,
+  NativeTraceListRow,
+  NativeTraceListResponse,
+  NativeTraceDetailResponse,
+  TraceQueryOrder,
+  TraceQueryState,
+  ZipkinEndpoint,
+  ZipkinAnnotation,
+  ZipkinKind,
+  ZipkinSpan,
+  ZipkinTraceListRow,
+  ZipkinTraceListResponse,
+  ZipkinTraceDetailResponse,
+  TraceListResponse,
+  TraceDetailResponse,
+  LogKeyValue,
+  LogRow,
+  LogTagFilter,
+  LogQueryRequest,
+  LogsResponse,
+  LogFacetsResponse,
 } from '@skywalking-horizon-ui/api-client';
 
 
@@ -80,6 +118,9 @@ export interface AdminLayerTemplate {
     traces?: boolean;
     logs?: boolean;
     profiling?: boolean;
+    traceProfiling?: boolean;
+    ebpfProfiling?: boolean;
+    asyncProfiling?: boolean;
   };
   metrics: {
     orderBy?: string;
@@ -98,6 +139,14 @@ export interface AdminLayerTemplate {
     spark?: string;
   };
   widgets: DashboardWidget[];
+  /** Operator-editable service-map config — node + server + client
+   *  metric definitions, with optional thresholds. */
+  topology?: TopologyConfig;
+  /** Operator-editable API-dependency config — node + server-side line
+   *  metrics (OAP has no client family for endpoint relations). */
+  endpointDependency?: EndpointDependencyConfig;
+  /** Per-layer trace source default. */
+  traces?: TracesConfig;
 }
 
 export class BffApiError extends Error {
@@ -292,6 +341,83 @@ export class BffClient {
     return this.request(
       'GET',
       `/api/layer/${encodeURIComponent(layerKey)}/endpoint-dependency?${qs.toString()}`,
+    );
+  }
+
+  /** List traces — fans out to SW-native and / or Zipkin based on
+   *  the layer's config and the operator's override. */
+  layerTraces(
+    layerKey: string,
+    body: {
+      source?: TraceSource;
+      service?: string;
+      serviceId?: string;
+      instanceId?: string;
+      endpointId?: string;
+      traceId?: string;
+      traceState?: TraceQueryState;
+      queryOrder?: TraceQueryOrder;
+      minTraceDuration?: number;
+      maxTraceDuration?: number;
+      pageNum?: number;
+      pageSize?: number;
+      tags?: Array<{ key: string; value: string }>;
+      windowMinutes?: number;
+      start?: string;
+      end?: string;
+    } = {},
+  ): Promise<TraceListResponse> {
+    return this.request<TraceListResponse>(
+      'POST',
+      `/api/layer/${encodeURIComponent(layerKey)}/traces`,
+      body,
+    );
+  }
+
+  /** Trace detail by id. `source=zipkin` swaps to the Zipkin REST
+   *  path; default is native (v2/v3 picked automatically). */
+  traceDetail(traceId: string, source: 'native' | 'zipkin' = 'native'): Promise<TraceDetailResponse> {
+    const qs = new URLSearchParams({ source });
+    return this.request<TraceDetailResponse>(
+      'GET',
+      `/api/trace/${encodeURIComponent(traceId)}?${qs.toString()}`,
+    );
+  }
+
+  /** Log query — body shape mirrors OAP's `LogQueryCondition`. */
+  layerLogs(layerKey: string, body: LogQueryRequest & { service?: string } = {}): Promise<LogsResponse> {
+    return this.request<LogsResponse>(
+      'POST',
+      `/api/layer/${encodeURIComponent(layerKey)}/logs`,
+      body,
+    );
+  }
+
+  /** Tag autocomplete — list known tag keys for the duration window. */
+  traceTagKeys(windowMinutes: number = 30): Promise<{ keys: string[]; generatedAt: number; error?: string }> {
+    return this.request('GET', `/api/trace-tags/keys?windowMinutes=${windowMinutes}`);
+  }
+  /** Tag autocomplete — list values for a specific key. */
+  traceTagValues(
+    key: string,
+    windowMinutes: number = 30,
+  ): Promise<{ key: string; values: string[]; generatedAt: number; error?: string }> {
+    return this.request(
+      'GET',
+      `/api/trace-tags/values?key=${encodeURIComponent(key)}&windowMinutes=${windowMinutes}`,
+    );
+  }
+
+  /** Log facets — same body as `layerLogs`, but returns aggregated
+   *  level + service counts across a larger window-scoped sample. */
+  layerLogFacets(
+    layerKey: string,
+    body: LogQueryRequest & { service?: string; sampleSize?: number } = {},
+  ): Promise<LogFacetsResponse> {
+    return this.request<LogFacetsResponse>(
+      'POST',
+      `/api/layer/${encodeURIComponent(layerKey)}/logs/facets`,
+      body,
     );
   }
 

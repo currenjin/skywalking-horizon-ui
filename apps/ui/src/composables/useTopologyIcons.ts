@@ -95,3 +95,13 @@ export function componentIcon(type: string | null | undefined): string {
   if (!key || key === 'N/A') return REGISTRY.UNDEFINED ?? '';
   return REGISTRY[key] ?? REGISTRY.UNDEFINED ?? '';
 }
+
+/** Like {@link componentIcon} but returns `null` when the type
+ *  doesn't map to a specific technology PNG (no UNDEFINED fallback).
+ *  Callers that want to render a custom "generic span" glyph on miss
+ *  use this so they can detect the unmatched case. */
+export function componentIconOrNull(type: string | null | undefined): string | null {
+  const key = normaliseKey(type);
+  if (!key || key === 'N/A') return null;
+  return REGISTRY[key] ?? null;
+}

@@ -35,9 +35,7 @@ function layerRoute(): RouteRecordRaw {
   // dependency + logs need their own page treatments (Phase 4 / 5);
   // their JSON template `components.*` flag still gates the sidebar
   // entry, this just keeps the URL routing legible.
-  const placeholderTabs: { path: string; label: string; phase: string }[] = [
-    { path: 'logs', label: 'Logs', phase: 'Phase 5' },
-  ];
+  const placeholderTabs: { path: string; label: string; phase: string }[] = [];
   return {
     path: 'layer/:layerKey',
     component: () => import('@/views/layer/LayerShell.vue'),
@@ -53,7 +51,8 @@ function layerRoute(): RouteRecordRaw {
       { path: 'endpoint', component: () => import('@/views/layer/LayerDashboardsView.vue') },
       { path: 'topology', component: () => import('@/views/layer/LayerServiceMapView.vue') },
       { path: 'dependency', component: () => import('@/views/layer/LayerEndpointDependencyView.vue') },
-      { path: 'trace', component: () => import('@/views/layer/LayerDashboardsView.vue') },
+      { path: 'trace', component: () => import('@/views/layer/LayerTracesView.vue') },
+      { path: 'logs', component: () => import('@/views/layer/LayerLogsView.vue') },
       { path: 'trace-profiling', component: () => import('@/views/layer/LayerDashboardsView.vue') },
       { path: 'ebpf-profiling', component: () => import('@/views/layer/LayerDashboardsView.vue') },
       { path: 'async-profiling', component: () => import('@/views/layer/LayerDashboardsView.vue') },

@@ -1,0 +1,234 @@
+{
+  "key": "WECHAT_MINI_PROGRAM",
+  "alias": "WeChat Mini Program",
+  "color": "var(--sw-cyan)",
+  "documentLink": "https://skywalking.apache.org/docs/main/next/en/setup/backend/backend-wechat-mini-program-monitoring/",
+  "aliases": {
+    "services": "Mini-programs",
+    "instances": "Versions",
+    "endpoints": "Pages"
+  },
+  "components": {
+    "service": true,
+    "instances": true,
+    "endpoints": true,
+    "topology": false,
+    "traces": true,
+    "logs": true
+  },
+  "layer-header": {
+    "orderBy": "cpm",
+    "columns": [
+      { "metric": "cpm", "label": "Request RPM", "unit": "rpm", "mqe": "meter_wechat_mp_request_cpm", "aggregation": "sum" },
+      { "metric": "launch", "label": "Launch", "unit": "ms", "mqe": "meter_wechat_mp_app_launch_duration", "aggregation": "avg" },
+      { "metric": "firstRender", "label": "First Render", "unit": "ms", "mqe": "meter_wechat_mp_first_render_duration", "aggregation": "avg" },
+      { "metric": "errors", "label": "Errors", "mqe": "meter_wechat_mp_error_count", "aggregation": "sum" }
+    ]
+  },
+  "overview": {
+    "groups": [
+      {
+        "title": "Latency & errors",
+        "size": "auto",
+        "metrics": [
+          { "id": "request_p95", "label": "Request P95", "tip": "95th-percentile request duration from the WeChat network bridge.", "mqe": "meter_wechat_mp_request_duration_percentile{p='95'}", "unit": "ms", "aggregation": "avg" },
+          { "id": "launch", "label": "Launch", "tip": "Mini-program launch duration as observed by the WeChat client.", "mqe": "meter_wechat_mp_app_launch_duration", "unit": "ms", "aggregation": "avg" },
+          { "id": "errors", "label": "Errors", "tip": "Reported error count.", "mqe": "meter_wechat_mp_error_count", "aggregation": "sum" }
+        ]
+      },
+      {
+        "title": "Throughput",
+        "size": "square",
+        "metrics": [
+          { "id": "cpm", "label": "Request RPM", "tip": "Bridge requests per minute.", "mqe": "meter_wechat_mp_request_cpm", "unit": "rpm", "aggregation": "sum" }
+        ]
+      }
+    ]
+  },
+  "dashboards": {
+    "service": [
+      {
+        "id": "launch_duration",
+        "title": "App Launch Duration",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["meter_wechat_mp_app_launch_duration"],
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "first_render",
+        "title": "First Render Duration",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["meter_wechat_mp_first_render_duration"],
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "package_load",
+        "title": "Package Load Duration",
+        "tip": "Time to download + parse the mini-program package bundle.",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["meter_wechat_mp_package_load_duration"],
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "error_count",
+        "title": "Error Count",
+        "type": "line",
+        "expressions": ["meter_wechat_mp_error_count"],
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "route_duration",
+        "title": "Route Duration",
+        "tip": "Time spent in mini-program page-route transitions.",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["meter_wechat_mp_route_duration"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "script_duration",
+        "title": "Script Duration",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["meter_wechat_mp_script_duration"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "request_cpm",
+        "title": "Request Load",
+        "type": "line",
+        "unit": "rpm",
+        "expressions": ["meter_wechat_mp_request_cpm"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "request_percentile",
+        "title": "Request Duration Percentile",
+        "type": "line",
+        "unit": "ms",
+        "expressions": [
+          "relabels(meter_wechat_mp_request_duration_percentile{p='50,75,90,95,99'},p='50,75,90,95,99',percentile='50,75,90,95,99')"
+        ],
+        "span": 12,
+        "rowSpan": 2
+      }
+    ],
+    "instance": [
+      {
+        "id": "v_launch",
+        "title": "Launch Duration",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["meter_wechat_mp_instance_app_launch_duration"],
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "v_first_render",
+        "title": "First Render Duration",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["meter_wechat_mp_instance_first_render_duration"],
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "v_package_load",
+        "title": "Package Load Duration",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["meter_wechat_mp_instance_package_load_duration"],
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "v_request_cpm",
+        "title": "Request Load",
+        "type": "line",
+        "unit": "rpm",
+        "expressions": ["meter_wechat_mp_instance_request_cpm"],
+        "span": 3,
+        "rowSpan": 2
+      },
+      {
+        "id": "v_route_duration",
+        "title": "Route Duration",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["meter_wechat_mp_instance_route_duration"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "v_script_duration",
+        "title": "Script Duration",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["meter_wechat_mp_instance_script_duration"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "v_request_percentile",
+        "title": "Request Duration Percentile",
+        "type": "line",
+        "unit": "ms",
+        "expressions": [
+          "relabels(meter_wechat_mp_instance_request_duration_percentile{p='50,75,90,95,99'},p='50,75,90,95,99',percentile='50,75,90,95,99')"
+        ],
+        "span": 4,
+        "rowSpan": 2
+      }
+    ],
+    "endpoint": [
+      {
+        "id": "ep_launch",
+        "title": "Launch Duration on Page",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["meter_wechat_mp_endpoint_app_launch_duration"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "ep_first_render",
+        "title": "First Render Duration",
+        "type": "line",
+        "unit": "ms",
+        "expressions": ["meter_wechat_mp_endpoint_first_render_duration"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "ep_request_cpm",
+        "title": "Request Load",
+        "type": "line",
+        "unit": "rpm",
+        "expressions": ["meter_wechat_mp_endpoint_request_cpm"],
+        "span": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "ep_request_percentile",
+        "title": "Request Duration Percentile",
+        "type": "line",
+        "unit": "ms",
+        "expressions": [
+          "relabels(meter_wechat_mp_endpoint_request_duration_percentile{p='50,75,90,95,99'},p='50,75,90,95,99',percentile='50,75,90,95,99')"
+        ],
+        "span": 12,
+        "rowSpan": 2
+      }
+    ]
+  }
+}

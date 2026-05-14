@@ -1,0 +1,313 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * `POST /api/layer/:key/logs`
+ *
+ * Wraps OAP's `queryLogs(LogQueryCondition)`. Body shape is the
+ * `LogQueryRequest` from `@skywalking-horizon-ui/api-client/logs`.
+ *
+ * Tag filters + content keyword filters are AND-joined server-side.
+ * We accept a `service` name on the body so the SPA doesn't have to
+ * pre-resolve names → ids; mirror of the topology + endpoint feeds.
+ *
+ * Returns at most one page of logs plus the OAP-reported total so
+ * the UI's "page N of M" + density histogram can scope correctly.
+ */
+
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type {
+  FetchLike,
+  LogFacetsResponse,
+  LogKeyValue,
+  LogQueryRequest,
+  LogRow,
+  LogsResponse,
+} from '@skywalking-horizon-ui/api-client';
+import type { ConfigSource } from '../config/loader.js';
+import type { SessionStore } from '../auth/sessions.js';
+import { requireAuth } from '../auth/middleware.js';
+import {  graphqlPost, buildOapOpts, type GraphqlOptions } from './graphql-client.js';
+
+export interface LogRouteDeps {
+  config: ConfigSource;
+  sessions: SessionStore;
+  fetch?: FetchLike;
+}
+
+const DEFAULT_WINDOW_MIN = 30;
+function fmtMinute(d: Date): string {
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const HH = String(d.getUTCHours()).padStart(2, '0');
+  const MM = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd} ${HH}${MM}`;
+}
+function defaultWindow(): { start: string; end: string } {
+  const end = new Date();
+  const start = new Date(end.getTime() - DEFAULT_WINDOW_MIN * 60_000);
+  return { start: fmtMinute(start), end: fmtMinute(end) };
+}
+
+const LIST_SERVICES_FOR_RESOLVE = /* GraphQL */ `
+  query ListServicesForLogs($layer: String!) {
+    services: listServices(layer: $layer) {
+      id
+      name
+    }
+  }
+`;
+
+const QUERY_LOGS = /* GraphQL */ `
+  query QueryLogs($condition: LogQueryCondition) {
+    data: queryLogs(condition: $condition) {
+      logs {
+        serviceName
+        serviceId
+        serviceInstanceName
+        serviceInstanceId
+        endpointName
+        endpointId
+        traceId
+        timestamp
+        contentType
+        content
+        tags { key value }
+      }
+      total
+    }
+  }
+`;
+
+interface OapLogRow {
+  serviceName?: string | null;
+  serviceId?: string | null;
+  serviceInstanceName?: string | null;
+  serviceInstanceId?: string | null;
+  endpointName?: string | null;
+  endpointId?: string | null;
+  traceId?: string | null;
+  timestamp: number;
+  contentType: string;
+  content: string;
+  tags?: LogKeyValue[] | null;
+}
+
+async function resolveServiceId(
+  opts: GraphqlOptions,
+  layer: string,
+  serviceArg: string,
+): Promise<string | null> {
+  if (!serviceArg) return null;
+  if (serviceArg.includes('.') && !/\s/.test(serviceArg)) return serviceArg;
+  const data = await graphqlPost<{ services: Array<{ id: string; name: string }> }>(
+    opts,
+    LIST_SERVICES_FOR_RESOLVE,
+    { layer: layer.toUpperCase() },
+  );
+  return (
+    data.services.find((s) => s.name === serviceArg)?.id ??
+    data.services.find((s) => s.id === serviceArg)?.id ??
+    null
+  );
+}
+
+interface LogBody extends LogQueryRequest {
+  service?: string;
+}
+
+export function registerLogRoute(app: FastifyInstance, deps: LogRouteDeps): void {
+  const auth = requireAuth(deps);
+  app.post(
+    '/api/layer/:key/logs',
+    { preHandler: auth },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const params = req.params as { key: string };
+      const layerKey = params.key;
+      if (!layerKey || !/^[a-z0-9_]+$/i.test(layerKey)) {
+        return reply.code(400).send({ error: 'invalid_layer_key' });
+      }
+      const body = (req.body ?? {}) as LogBody;
+      const opts = buildOapOpts(deps.config.current, deps.fetch);
+      const window = defaultWindow();
+
+      // Resolve a service NAME to an id if the caller used one.
+      let serviceId = body.serviceId ?? null;
+      if (!serviceId && body.service) {
+        try {
+          serviceId = await resolveServiceId(opts, layerKey, body.service);
+        } catch (err) {
+          return reply.send({
+            generatedAt: Date.now(),
+            query: body,
+            total: 0,
+            logs: [],
+            reachable: false,
+            error: err instanceof Error ? err.message : String(err),
+          } satisfies LogsResponse);
+        }
+      }
+      const condition = {
+        ...(serviceId ? { serviceId } : {}),
+        ...(body.serviceInstanceId ? { serviceInstanceId: body.serviceInstanceId } : {}),
+        ...(body.endpointId ? { endpointId: body.endpointId } : {}),
+        ...(body.traceId ? { relatedTrace: { traceId: body.traceId } } : {}),
+        ...(body.keywordsOfContent && body.keywordsOfContent.length > 0
+          ? { keywordsOfContent: body.keywordsOfContent }
+          : {}),
+        ...(body.tags && body.tags.length > 0 ? { tags: body.tags } : {}),
+        queryDuration: { start: window.start, end: window.end, step: 'MINUTE' },
+        paging: {
+          pageNum: body.page ?? 1,
+          pageSize: body.pageSize ?? 50,
+        },
+      };
+
+      try {
+        const env = await graphqlPost<{
+          data: { logs: OapLogRow[]; total: number };
+        }>(opts, QUERY_LOGS, { condition });
+        const logs: LogRow[] = (env.data?.logs ?? []).map((r) => ({
+          serviceName: r.serviceName ?? null,
+          serviceId: r.serviceId ?? null,
+          serviceInstanceName: r.serviceInstanceName ?? null,
+          serviceInstanceId: r.serviceInstanceId ?? null,
+          endpointName: r.endpointName ?? null,
+          endpointId: r.endpointId ?? null,
+          traceId: r.traceId ?? null,
+          timestamp: r.timestamp,
+          contentType: r.contentType,
+          content: r.content,
+          tags: r.tags ?? [],
+        }));
+        return reply.send({
+          generatedAt: Date.now(),
+          query: body,
+          total: env.data?.total ?? logs.length,
+          logs,
+          reachable: true,
+        } satisfies LogsResponse);
+      } catch (err) {
+        return reply.send({
+          generatedAt: Date.now(),
+          query: body,
+          total: 0,
+          logs: [],
+          reachable: false,
+          error: err instanceof Error ? err.message : String(err),
+        } satisfies LogsResponse);
+      }
+    },
+  );
+
+  /**
+   * POST /api/layer/:key/logs/facets
+   *
+   * Fetches a larger window-scoped sample (default 200 rows) just for
+   * facet aggregation. The UI calls this in parallel with the page
+   * fetch so the left-rail counts reflect the query window, not the
+   * displayed page.
+   */
+  app.post(
+    '/api/layer/:key/logs/facets',
+    { preHandler: auth },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const params = req.params as { key: string };
+      const layerKey = params.key;
+      if (!layerKey || !/^[a-z0-9_]+$/i.test(layerKey)) {
+        return reply.code(400).send({ error: 'invalid_layer_key' });
+      }
+      const body = (req.body ?? {}) as LogBody & { sampleSize?: number };
+      const sampleSize = Math.max(50, Math.min(1000, body.sampleSize ?? 200));
+      const opts = buildOapOpts(deps.config.current, deps.fetch);
+      const window = defaultWindow();
+      let serviceId = body.serviceId ?? null;
+      if (!serviceId && body.service) {
+        try {
+          serviceId = await resolveServiceId(opts, layerKey, body.service);
+        } catch (err) {
+          return reply.send({
+            generatedAt: Date.now(),
+            total: 0,
+            sampled: 0,
+            level: { error: 0, warn: 0, info: 0, debug: 0, other: 0 },
+            services: [],
+            reachable: false,
+            error: err instanceof Error ? err.message : String(err),
+          } satisfies LogFacetsResponse);
+        }
+      }
+      const condition = {
+        ...(serviceId ? { serviceId } : {}),
+        ...(body.serviceInstanceId ? { serviceInstanceId: body.serviceInstanceId } : {}),
+        ...(body.endpointId ? { endpointId: body.endpointId } : {}),
+        ...(body.traceId ? { relatedTrace: { traceId: body.traceId } } : {}),
+        ...(body.keywordsOfContent && body.keywordsOfContent.length > 0
+          ? { keywordsOfContent: body.keywordsOfContent }
+          : {}),
+        // Facet sample intentionally ignores level/tag filters so the
+        // counts show the unfiltered distribution; the user picks a
+        // level from the breakdown.
+        queryDuration: { start: window.start, end: window.end, step: 'MINUTE' },
+        paging: { pageNum: 1, pageSize: sampleSize },
+      };
+
+      try {
+        const env = await graphqlPost<{
+          data: { logs: OapLogRow[]; total: number };
+        }>(opts, QUERY_LOGS, { condition });
+        const rows = env.data?.logs ?? [];
+        const level: LogFacetsResponse['level'] = { error: 0, warn: 0, info: 0, debug: 0, other: 0 };
+        const svcMap = new Map<string, number>();
+        for (const r of rows) {
+          const tag = (r.tags ?? []).find((t) => t.key.toLowerCase() === 'level');
+          const raw = (tag?.value ?? '').toLowerCase();
+          if (raw.includes('error') || raw === 'err' || raw === 'fatal') level.error++;
+          else if (raw.includes('warn')) level.warn++;
+          else if (raw.includes('info')) level.info++;
+          else if (raw.includes('debug') || raw.includes('trace')) level.debug++;
+          else level.other++;
+          const svc = r.serviceName ?? '(none)';
+          svcMap.set(svc, (svcMap.get(svc) ?? 0) + 1);
+        }
+        const services = Array.from(svcMap.entries())
+          .map(([name, count]) => ({ name, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 12);
+        return reply.send({
+          generatedAt: Date.now(),
+          total: env.data?.total ?? rows.length,
+          sampled: rows.length,
+          level,
+          services,
+          reachable: true,
+        } satisfies LogFacetsResponse);
+      } catch (err) {
+        return reply.send({
+          generatedAt: Date.now(),
+          total: 0,
+          sampled: 0,
+          level: { error: 0, warn: 0, info: 0, debug: 0, other: 0 },
+          services: [],
+          reachable: false,
+          error: err instanceof Error ? err.message : String(err),
+        } satisfies LogFacetsResponse);
+      }
+    },
+  );
+}

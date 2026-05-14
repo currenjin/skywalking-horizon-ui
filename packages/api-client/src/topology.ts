@@ -60,6 +60,31 @@ export interface TopologyMetricDef {
   role?: 'center' | 'ring' | 'secondary' | 'lineServer' | 'lineClient';
   /** Aggregation across the duration window. Defaults to `avg`. */
   aggregation?: 'sum' | 'avg';
+  /**
+   * Operator-editable 4-band thresholds. Used when this metric drives
+   * a colour band (typically the metric with `role: 'ring'`). Three
+   * boundaries → four bands rendered as:
+   *
+   *   value ≤ ok       → green   (var(--sw-ok))
+   *   ok < value ≤ warn      → light yellow (#fbbf24)
+   *   warn < value ≤ danger  → dark yellow  (var(--sw-warn))
+   *   value > danger          → red     (var(--sw-err))
+   *
+   * For "higher is better" metrics (SLA / apdex / success rate)
+   * set `invertHealth: true`; the renderer evaluates the bands on
+   * `(invertBase - value)` instead. `invertBase` defaults to 100
+   * for percent-style metrics.
+   *
+   * When the block is absent, the renderer falls back to the
+   * historical heuristic (`error %` ≤ 0.1 / 1 / 5).
+   */
+  thresholds?: {
+    ok?: number;
+    warn?: number;
+    danger?: number;
+    invertHealth?: boolean;
+    invertBase?: number;
+  };
 }
 
 /** Operator-editable topology dashboard config. Lives in the layer

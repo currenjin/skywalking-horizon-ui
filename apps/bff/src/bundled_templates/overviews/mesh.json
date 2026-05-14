@@ -1,0 +1,82 @@
+{
+  "id": "mesh",
+  "title": "Mesh service",
+  "description": "Service-mesh overview — control-plane + data-plane signals with the K8s service-count cross-referenced.",
+  "widgets": [
+    {
+      "id": "m_count",
+      "title": "Active mesh services",
+      "tip": "Services routed through the mesh data-plane.",
+      "layer": "MESH",
+      "type": "service-count",
+      "span": 3,
+      "rowSpan": 1
+    },
+    {
+      "id": "m_rpm",
+      "title": "Mesh RPM",
+      "tip": "Mesh-wide requests per minute.",
+      "layer": "MESH",
+      "type": "metric",
+      "mqe": "service_mesh_cpm",
+      "unit": "rpm",
+      "aggregation": "sum",
+      "span": 3,
+      "rowSpan": 1
+    },
+    {
+      "id": "m_p99",
+      "title": "P99 latency",
+      "tip": "99th-percentile response time across mesh-routed traffic.",
+      "layer": "MESH",
+      "type": "metric",
+      "mqe": "service_mesh_percentile{p='99'}",
+      "unit": "ms",
+      "aggregation": "avg",
+      "span": 3,
+      "rowSpan": 1
+    },
+    {
+      "id": "m_err",
+      "title": "Error rate",
+      "tip": "100 − mesh SLA.",
+      "layer": "MESH",
+      "type": "metric",
+      "mqe": "100 - service_mesh_sla/100",
+      "unit": "%",
+      "aggregation": "avg",
+      "span": 3,
+      "rowSpan": 1
+    },
+    {
+      "id": "k8s_count",
+      "title": "K8s services",
+      "tip": "Services reporting through the K8s service layer.",
+      "layer": "K8S_SERVICE",
+      "type": "service-count",
+      "span": 3,
+      "rowSpan": 1
+    },
+    {
+      "id": "k8s_p99",
+      "title": "K8s P99",
+      "tip": "99th-percentile latency for K8s-routed traffic.",
+      "layer": "K8S_SERVICE",
+      "type": "metric",
+      "mqe": "k8s_service_resp_time_percentile{p='99'}",
+      "unit": "ms",
+      "aggregation": "avg",
+      "span": 3,
+      "rowSpan": 1
+    },
+    {
+      "id": "m_topo",
+      "title": "Mesh service topology",
+      "tip": "Live service map for the mesh data-plane.",
+      "layer": "MESH",
+      "type": "topology",
+      "span": 12,
+      "rowSpan": 4
+    }
+  ]
+}
