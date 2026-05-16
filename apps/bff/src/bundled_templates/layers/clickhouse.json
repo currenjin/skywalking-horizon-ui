@@ -81,12 +81,12 @@
       {
         "id": "files_open",
         "title": "Files Open",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(aggregate_labels(meter_clickhouse_file_open,sum))"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "qps",
@@ -271,22 +271,22 @@
       {
         "id": "uptime",
         "title": "Uptime (days)",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_clickhouse_instance_uptime)/3600/24"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "version",
         "title": "Version",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_clickhouse_instance_version)"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "cpu",
@@ -427,12 +427,12 @@
       {
         "id": "files",
         "title": "Files Open",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_clickhouse_instance_file_open)"
         ],
         "span": 4,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "insert_io",

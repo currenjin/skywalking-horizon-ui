@@ -143,12 +143,12 @@
       {
         "id": "consumer_lag",
         "title": "Max Consumer Latency",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_rocketmq_cluster_max_consumer_latency)"
         ],
         "span": 4,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "commitlog_ratio",
@@ -330,22 +330,22 @@
       {
         "id": "consumer_groups",
         "title": "Consumer Group Count",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_rocketmq_topic_consumer_group_count)"
         ],
         "span": 6,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "brokers",
         "title": "Broker Count",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_rocketmq_topic_broker_count)"
         ],
         "span": 6,
-        "rowSpan": 2
+        "rowSpan": 1
       }
     ]
   }

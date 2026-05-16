@@ -309,8 +309,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // Bundled layer JSONs live alongside other static templates under
 // `apps/bff/src/bundled_templates/`. In the long run these should be
 // served by OAP; for now they ship inside the BFF so a fresh deploy
-// renders something sensible without any operator setup.
-const CONFIG_DIR = join(__dirname, '..', 'bundled_templates', 'layers');
+// renders something sensible without any operator setup. Two levels
+// up from logic/layers/ to reach apps/bff/src/.
+const CONFIG_DIR = join(__dirname, '..', '..', 'bundled_templates', 'layers');
 
 let cache: Map<string, LayerTemplate> | null = null;
 

@@ -227,42 +227,42 @@
       {
         "id": "ready_msgs",
         "title": "Ready Messages",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_rabbitmq_node_queue_messages_ready)"
         ],
         "span": 4,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "incoming",
         "title": "Incoming Messages",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_rabbitmq_node_incoming_messages)"
         ],
         "span": 4,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "outgoing",
         "title": "Outgoing Messages",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_rabbitmq_node_outgoing_messages_total)"
         ],
         "span": 4,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "unack",
         "title": "Unacknowledged Messages",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_rabbitmq_node_unacknowledged_messages)"
         ],
         "span": 4,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "conns",
@@ -299,13 +299,13 @@
       {
         "id": "memory_pct",
         "title": "Allocated Used %",
-        "type": "line",
+        "type": "card",
         "unit": "%",
         "expressions": [
           "latest(meter_rabbitmq_node_allocated_used_percent)/100"
         ],
         "span": 4,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "memory_bytes",

@@ -45,6 +45,7 @@ Every OAP metric lives under exactly one entity scope (Service / ServiceInstance
 
 - **Storage backends have undocumented limits.** Page sizes, nested selections, and per-record sub-queries fail at backend-specific thresholds. Degrade list queries to the cheapest selection that satisfies the screen; probe before defaulting.
 - **OAP IDs are not always per-record unique.** Some wire `id` fields key on the alarmed/related entity, not the firing instance. Disambiguate composite keys with timestamp before using `id` as a row key.
+- **Widget type follows MQE shape.** A widget whose MQE collapses to a single scalar must be `type: "card"`, not `type: "line"`. The tell-tale is the outermost call: `latest(...)`, `max(...)`, `min(...)`, `avg(<plain-metric>)`, `sum(<plain-metric>)` all reduce the window to one number — line-charting a single point is wasteful and misleads operators into thinking the metric is time-varying. Series-shaped wrappers (`relabels(...)`, `top_n(...)`, `histogram*(...)`, `aggregate_labels(...)` without an outer scalar collapse, `rate(...)`, `increase(...)`) stay `line`. When adding or porting a widget, look at the outermost function first.
 
 ## Design source of truth
 

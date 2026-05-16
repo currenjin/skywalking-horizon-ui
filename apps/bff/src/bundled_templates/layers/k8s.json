@@ -185,47 +185,47 @@
       {
         "id": "pod_waiting",
         "title": "Pods Waiting",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(k8s_cluster_pod_status_waiting)"
         ],
         "span": 3,
-        "rowSpan": 2,
+        "rowSpan": 1,
         "format": "int"
       },
       {
         "id": "pod_not_running",
         "title": "Pods Not Running",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(k8s_cluster_pod_status_not_running)"
         ],
         "span": 3,
-        "rowSpan": 2,
+        "rowSpan": 1,
         "format": "int"
       },
       {
         "id": "service_pod_status",
         "title": "Service Pod Status",
         "tip": "Aggregate health of pods backing K8s Service objects.",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(k8s_cluster_service_pod_status)"
         ],
         "span": 4,
-        "rowSpan": 2,
+        "rowSpan": 1,
         "format": "int"
       },
       {
         "id": "node_status",
         "title": "Node Status",
         "tip": "Sum of node Ready states.",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(k8s_cluster_node_status)"
         ],
         "span": 4,
-        "rowSpan": 2,
+        "rowSpan": 1,
         "format": "int"
       },
       {
@@ -254,12 +254,12 @@
       {
         "id": "node_status",
         "title": "Node Status",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(k8s_node_node_status)"
         ],
         "span": 3,
-        "rowSpan": 2,
+        "rowSpan": 1,
         "format": "int"
       },
       {

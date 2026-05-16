@@ -75,22 +75,22 @@
       {
         "id": "jobs",
         "title": "Running Jobs",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_flink_jobManager_running_job_number)"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "task_mgrs",
         "title": "TaskManagers",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_flink_jobManager_taskManagers_registered_number)"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "slots",
@@ -433,42 +433,42 @@
       {
         "id": "running_time",
         "title": "Job Running Time (min)",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_flink_job_runningTime)/1000/60"
         ],
         "span": 4,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "restarting_time",
         "title": "Job Restarting Time (min)",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_flink_job_restartingTime)/1000/60"
         ],
         "span": 4,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "cancelling_time",
         "title": "Job Cancelling Time (min)",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_flink_job_cancellingTime)/1000/60"
         ],
         "span": 4,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "restarts",
         "title": "Job Restarts",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_flink_job_restart_number)"
         ],
         "span": 4,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "checkpoints",

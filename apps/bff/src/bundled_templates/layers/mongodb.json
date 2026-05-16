@@ -95,42 +95,42 @@
       {
         "id": "uptime",
         "title": "Cluster Uptime (days)",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(aggregate_labels(meter_mongodb_cluster_uptime,max))/3600/24"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "data_size",
         "title": "Data Size (GB)",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(aggregate_labels(meter_mongodb_cluster_data_size,sum))/1024/1024/1024"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "coll_count",
         "title": "Collection Count",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(aggregate_labels(meter_mongodb_cluster_collection_count,sum))"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "obj_count",
         "title": "Object Count",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(aggregate_labels(meter_mongodb_cluster_object_count,sum))"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "doc_qps",
@@ -186,34 +186,34 @@
       {
         "id": "db_data_size",
         "title": "DB Total Data (GB)",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(aggregate_labels(meter_mongodb_cluster_db_data_size, sum(database)))/1024/1024/1024"
         ],
         "span": 4,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "db_index_size",
         "title": "DB Total Index (GB)",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(aggregate_labels(meter_mongodb_cluster_db_index_size, sum(database)))/1024/1024/1024"
         ],
         "span": 4,
-        "rowSpan": 2
+        "rowSpan": 1
       }
     ],
     "instance": [
       {
         "id": "uptime",
         "title": "Uptime (days)",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_mongodb_node_uptime)/3600/24"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "qps",

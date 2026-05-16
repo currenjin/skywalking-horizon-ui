@@ -337,12 +337,12 @@
       {
         "id": "max_lag",
         "title": "Max Lag (broker)",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "sum(meter_kafka_broker_max_lag)"
         ],
         "span": 6,
-        "rowSpan": 2
+        "rowSpan": 1
       }
     ]
   }

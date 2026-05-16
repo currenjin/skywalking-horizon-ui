@@ -201,10 +201,8 @@ const sections: NavSection[] = [
         // Match the tab variants only; the history sibling at
         // /operate/live-debug/history must NOT highlight this row.
         activeWhen: (p) => p === '/operate/live-debug' || /^\/operate\/live-debug\/(mal|lal|oal)(\/|$)/.test(p),
-        children: [
-          { icon: 'event', label: 'Capture history', to: '/operate/live-debug/history' },
-        ],
       },
+      { icon: 'event', label: 'Capture history', to: '/operate/live-debug/history' },
       { icon: 'metric', label: 'Metrics Inspect', to: '/operate/inspect' },
       {
         icon: 'set',

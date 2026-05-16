@@ -180,44 +180,44 @@
       {
         "id": "uptime",
         "title": "Uptime",
-        "type": "line",
+        "type": "card",
         "unit": "days",
         "expressions": [
           "latest(meter_mysql_instance_uptime)/3600/24"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "max_conns",
         "title": "Max Connections",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_mysql_instance_max_connections)"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "buffer_pool",
         "title": "InnoDB Buffer Pool",
-        "type": "line",
+        "type": "card",
         "unit": "MB",
         "expressions": [
           "latest(meter_mysql_instance_innodb_buffer_pool_size)/1024/1024"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "thread_cache",
         "title": "Thread Cache Size",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_mysql_instance_thread_cache_size)"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "instance_qps_tps",

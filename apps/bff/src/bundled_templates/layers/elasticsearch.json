@@ -92,32 +92,32 @@
       {
         "id": "nodes",
         "title": "Nodes",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_elasticsearch_cluster_nodes)"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "pending_tasks",
         "title": "Pending Tasks",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "avg(meter_elasticsearch_cluster_pending_tasks_total)"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "primary_shards",
         "title": "Primary Shards",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_elasticsearch_cluster_primary_shards_total)"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "shards_breakdown",
@@ -143,43 +143,43 @@
       {
         "id": "breakers",
         "title": "Tripped Breakers",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_elasticsearch_cluster_breakers_tripped)"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "cluster_cpu",
         "title": "Cluster CPU Avg",
-        "type": "line",
+        "type": "card",
         "unit": "%",
         "expressions": [
           "avg(meter_elasticsearch_cluster_cpu_usage_avg)"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "cluster_jvm",
         "title": "JVM Memory Used Avg",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "avg(meter_elasticsearch_cluster_jvm_memory_used_avg)"
         ],
         "span": 4,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "open_files",
         "title": "Open Files Avg",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "avg(meter_elasticsearch_cluster_open_file_count)"
         ],
         "span": 4,
-        "rowSpan": 2
+        "rowSpan": 1
       }
     ],
     "instance": [
@@ -348,12 +348,12 @@
       {
         "id": "open_files",
         "title": "Open Files",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "avg(meter_elasticsearch_node_open_file_count)"
         ],
         "span": 6,
-        "rowSpan": 2
+        "rowSpan": 1
       }
     ],
     "endpoint": [

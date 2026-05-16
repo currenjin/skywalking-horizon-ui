@@ -174,22 +174,22 @@
       {
         "id": "datastore",
         "title": "Datastore Reachable",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(aggregate_labels(meter_kong_service_datastore_reachable,sum(service_instance_id)))"
         ],
         "span": 6,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "nginx_errors",
         "title": "Nginx Metric Errors",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(aggregate_labels(meter_kong_service_nginx_metric_errors_total,sum))"
         ],
         "span": 6,
-        "rowSpan": 2
+        "rowSpan": 1
       }
     ],
     "instance": [
@@ -260,12 +260,12 @@
       {
         "id": "datastore",
         "title": "Datastore Reachable",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_kong_instance_datastore_reachable)"
         ],
         "span": 4,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "conns",

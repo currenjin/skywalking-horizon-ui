@@ -38,8 +38,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Bundled overview dashboards live under `bundled_templates/overviews/`
 // (sibling to `bundled_templates/layers/`). Co-locating the static
 // templates keeps the future "operator-editable / OAP-served" migration
-// to one directory swap.
-const CONFIG_DIR = path.join(__dirname, '..', 'bundled_templates', 'overviews');
+// to one directory swap. Two levels up from logic/overview/ to reach
+// apps/bff/src/.
+const CONFIG_DIR = path.join(__dirname, '..', '..', 'bundled_templates', 'overviews');
 
 let cache: OverviewDashboard[] | null = null;
 

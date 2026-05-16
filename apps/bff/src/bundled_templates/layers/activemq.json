@@ -113,13 +113,13 @@
       {
         "id": "heap_max",
         "title": "Heap Max (MB)",
-        "type": "line",
+        "type": "card",
         "unit": "MB",
         "expressions": [
           "latest(aggregate_labels(meter_activemq_cluster_heap_memory_usage_max,sum))/1024/1024"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "enqueue_dequeue",

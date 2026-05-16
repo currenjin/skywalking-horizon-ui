@@ -270,46 +270,46 @@
       {
         "id": "shared_buffers",
         "title": "Shared Buffers",
-        "type": "line",
+        "type": "card",
         "unit": "MB",
         "expressions": [
           "latest(meter_pg_instance_shared_buffers)/1024/1024"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "effective_cache",
         "title": "Effective Cache",
-        "type": "line",
+        "type": "card",
         "unit": "GB",
         "expressions": [
           "latest(meter_pg_instance_effective_cache)/1024/1024/1024"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "work_mem",
         "title": "Work Mem",
-        "type": "line",
+        "type": "card",
         "unit": "MB",
         "expressions": [
           "latest(meter_pg_instance_work_mem)/1024/1024"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "max_wal_size",
         "title": "Max WAL Size",
-        "type": "line",
+        "type": "card",
         "unit": "GB",
         "expressions": [
           "latest(meter_pg_instance_max_wal_size)/1024/1024/1024"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "instance_fetched",

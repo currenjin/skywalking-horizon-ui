@@ -91,43 +91,43 @@
       {
         "id": "uptime",
         "title": "Uptime (days)",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(aggregate_labels(meter_redis_uptime,max))/3600/24"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "clients",
         "title": "Connected Clients",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(aggregate_labels(meter_redis_connected_clients,sum))"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "blocked",
         "title": "Blocked Clients",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(aggregate_labels(meter_redis_blocked_clients,sum))"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "mem_pct",
         "title": "Memory Usage",
-        "type": "line",
+        "type": "card",
         "unit": "%",
         "expressions": [
           "latest(aggregate_labels(meter_redis_memory_used_bytes,sum)/aggregate_labels(meter_redis_memory_max_bytes,sum))*100"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "commands",
@@ -209,42 +209,42 @@
       {
         "id": "uptime",
         "title": "Uptime (days)",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_redis_instance_uptime)/3600/24"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "clients",
         "title": "Connected Clients",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_redis_instance_connected_clients)"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "blocked",
         "title": "Blocked Clients",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_redis_instance_redis_blocked_clients)"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "max_mem",
         "title": "Memory Max (MB)",
-        "type": "line",
+        "type": "card",
         "expressions": [
           "latest(meter_redis_instance_memory_max_bytes)/1000/1000"
         ],
         "span": 3,
-        "rowSpan": 2
+        "rowSpan": 1
       },
       {
         "id": "mem_pct",
