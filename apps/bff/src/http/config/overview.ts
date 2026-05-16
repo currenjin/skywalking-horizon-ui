@@ -35,10 +35,10 @@ import type {
   OverviewDashboardListResponse,
   OverviewDashboardResponse,
 } from '@skywalking-horizon-ui/api-client';
-import type { ConfigSource } from '../config/loader.js';
-import type { SessionStore } from '../auth/sessions.js';
-import { requireAuth } from '../auth/middleware.js';
-import { getOverviewDashboard, loadOverviewDashboards } from './loader.js';
+import type { ConfigSource } from '../../config/loader.js';
+import type { SessionStore } from '../../user/sessions.js';
+import { requireAuth } from '../../user/middleware.js';
+import { getOverviewDashboard, loadOverviewDashboards } from '../../logic/overview/loader.js';
 
 export interface OverviewRouteDeps {
   config: ConfigSource;

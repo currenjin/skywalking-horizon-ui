@@ -17,10 +17,10 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { FetchLike } from '@skywalking-horizon-ui/api-client';
-import type { ConfigSource } from '../config/loader.js';
-import type { SessionStore } from '../auth/sessions.js';
-import { requireAuth } from '../auth/middleware.js';
-import { buildOapOpts, graphqlPost } from './graphql-client.js';
+import type { ConfigSource } from '../../config/loader.js';
+import type { SessionStore } from '../../user/sessions.js';
+import { requireAuth } from '../../user/middleware.js';
+import { buildOapOpts, graphqlPost } from '../../client/graphql.js';
 
 /**
  * One round-trip combining `version`, `getTimeInfo`, and `checkHealth`.

@@ -19,7 +19,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import type { LayerConfig } from '@skywalking-horizon-ui/api-client';
-import { logger } from '../logger.js';
+import { logger } from '../../logger.js';
 
 /**
  * File-backed store for per-layer setup overrides.

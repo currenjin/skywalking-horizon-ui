@@ -21,33 +21,46 @@ import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import { AuditLogger } from './audit/logger.js';
-import { registerAuthRoutes } from './auth/routes.js';
-import { SessionStore } from './auth/sessions.js';
+import { SessionStore } from './user/sessions.js';
 import { loadConfig, type ConfigSource } from './config/loader.js';
-import { registerDashboardRoute } from './dashboard/routes.js';
-import { registerEndpointRoute } from './oap/endpoint-routes.js';
-import { registerEndpointDependencyRoute } from './oap/endpoint-dependency-routes.js';
-import { registerOapInfoRoute } from './oap/info-routes.js';
-import { registerInstanceRoute } from './oap/instance-routes.js';
-import { registerLandingRoute } from './oap/landing-routes.js';
-import { registerLogRoute } from './oap/log-routes.js';
-import { registerMenuRoute } from './oap/menu-routes.js';
-import { registerOapRoutes } from './oap/routes.js';
-import { registerPreflightRoutes } from './oap/preflight-routes.js';
-import { registerDebugRoutes } from './oap/debug-routes.js';
-import { registerInspectRoutes } from './oap/inspect-routes.js';
-import { registerAlarmsRoutes } from './alarms/routes.js';
-import { AlarmsStore } from './alarms/store.js';
-import { registerProfileRoutes } from './oap/profile-routes.js';
-import { registerEBPFRoutes } from './oap/ebpf-routes.js';
-import { registerAsyncProfileRoutes } from './oap/async-profile-routes.js';
-import { registerTopologyRoute } from './oap/topology-routes.js';
-import { registerTraceRoutes } from './oap/trace-routes.js';
-import { registerTraceTagRoutes } from './oap/trace-tag-routes.js';
-import { registerZipkinRoutes } from './oap/zipkin-routes.js';
-import { registerOverviewRoutes } from './overview/routes.js';
-import { registerSetupRoutes } from './setup/routes.js';
-import { SetupStore } from './setup/store.js';
+// User
+import { registerAuthRoutes } from './http/user.js';
+// Query (read-only data from OAP)
+import { registerOapInfoRoute } from './http/query/info.js';
+import { registerMenuRoute } from './http/query/menu.js';
+import { registerLandingRoute } from './http/query/landing.js';
+import { registerInstanceRoute } from './http/query/instance.js';
+import { registerEndpointRoute } from './http/query/endpoint.js';
+import { registerTopologyRoute } from './http/query/topology.js';
+import { registerEndpointDependencyRoute } from './http/query/endpoint-dependency.js';
+import { registerTraceRoutes } from './http/query/trace.js';
+import { registerTraceTagRoutes } from './http/query/trace-tag.js';
+import { registerZipkinRoutes } from './http/query/zipkin.js';
+import { registerLogRoute } from './http/query/log.js';
+import { registerDashboardQueryRoute } from './http/query/dashboard.js';
+import { registerAlarmsQueryRoutes } from './http/query/alarms.js';
+import { registerPreflightRoutes } from './http/query/preflight.js';
+import { registerProfileRoutes } from './http/query/profile.js';
+import { registerEBPFRoutes } from './http/query/ebpf.js';
+import { registerAsyncProfileRoutes } from './http/query/async-profile.js';
+// Config (CRUD for templates / settings)
+import { registerDashboardConfigRoute } from './http/config/dashboard.js';
+import { registerLayerTemplateRoutes } from './http/config/layer-template.js';
+import { registerAlarmsConfigRoutes } from './http/config/alarms.js';
+import { registerSetupRoutes } from './http/config/setup.js';
+import { registerOverviewRoutes } from './http/config/overview.js';
+// Admin (operational tools)
+import { registerDslCatalogRoutes } from './http/admin/dsl/catalog.js';
+import { registerDslRuleRoutes } from './http/admin/dsl/rule.js';
+import { registerDslDumpRoutes } from './http/admin/dsl/dump.js';
+import { registerDslOalRoutes } from './http/admin/dsl/oal.js';
+import { registerClusterRoutes } from './http/admin/cluster.js';
+import { registerDebugRoutes } from './http/admin/live-debug.js';
+import { registerInspectRoutes } from './http/admin/inspect.js';
+// Logic / stores
+import { AlarmsStore } from './logic/alarms/store.js';
+import { SetupStore } from './logic/setup/store.js';
+import { ServiceLayerMap } from './logic/alarms/service-layer-map.js';
 import { HttpError } from './errors.js';
 import { logger, loggerOptions } from './logger.js';
 
@@ -75,13 +88,18 @@ const setupStore = new SetupStore(source.current.setup.file);
 await setupStore.load();
 const alarmsStore = new AlarmsStore(source.current.alarms.file);
 await alarmsStore.load();
+// Shared between alarms query (read) + alarms config (write+invalidate).
+const serviceLayer = new ServiceLayerMap({ config: source });
 
 await app.register(cookie);
 
 // Text/plain body parser — the rule editor sends raw YAML to /api/rule.
 app.addContentTypeParser('text/plain', { parseAs: 'string' }, (_req, body, done) => done(null, body));
 
+// ── User ───────────────────────────────────────────────────────────
 registerAuthRoutes(app, source, sessions, audit);
+
+// ── Query ──────────────────────────────────────────────────────────
 registerOapInfoRoute(app, { config: source, sessions });
 registerMenuRoute(app, { config: source, sessions });
 registerLandingRoute(app, { config: source, sessions });
@@ -93,22 +111,28 @@ registerTraceRoutes(app, { config: source, sessions });
 registerTraceTagRoutes(app, { config: source, sessions });
 registerZipkinRoutes(app, { config: source, sessions });
 registerLogRoute(app, { config: source, sessions });
-registerOverviewRoutes(app, { config: source, sessions });
-registerDashboardRoute(app, { config: source, sessions });
-registerSetupRoutes(app, { config: source, sessions, audit, store: setupStore });
-registerOapRoutes(app, { config: source, sessions, audit });
+registerDashboardQueryRoute(app, { config: source, sessions });
+registerAlarmsQueryRoutes(app, { config: source, sessions, serviceLayer, store: alarmsStore });
 registerPreflightRoutes(app, { config: source, sessions });
-// Live debugger — `/api/debug/*` proxies for SWIP-13's
-// `/dsl-debugging/*` wire (start / poll / stop session, list active
-// sessions, per-node status fan-out).
-registerDebugRoutes(app, { config: source, sessions, audit });
-// Inspect — OAP metric catalog browse + MQE ad-hoc execution.
-registerInspectRoutes(app, { config: source, sessions, audit });
-// Alarms — getAlarm proxy + traffic-background fan-out + config CRUD.
-registerAlarmsRoutes(app, { config: source, sessions, audit, store: alarmsStore });
 registerProfileRoutes(app, { config: source, sessions });
 registerEBPFRoutes(app, { config: source, sessions });
 registerAsyncProfileRoutes(app, { config: source, sessions });
+
+// ── Config ─────────────────────────────────────────────────────────
+registerDashboardConfigRoute(app, { config: source, sessions });
+registerLayerTemplateRoutes(app, { config: source, sessions });
+registerAlarmsConfigRoutes(app, { config: source, sessions, audit, store: alarmsStore, serviceLayer });
+registerSetupRoutes(app, { config: source, sessions, audit, store: setupStore });
+registerOverviewRoutes(app, { config: source, sessions });
+
+// ── Admin ──────────────────────────────────────────────────────────
+registerDslCatalogRoutes(app, { config: source, sessions, audit });
+registerDslRuleRoutes(app, { config: source, sessions, audit });
+registerDslDumpRoutes(app, { config: source, sessions, audit });
+registerDslOalRoutes(app, { config: source, sessions, audit });
+registerClusterRoutes(app, { config: source, sessions, audit });
+registerDebugRoutes(app, { config: source, sessions, audit });
+registerInspectRoutes(app, { config: source, sessions, audit });
 
 // Serve the built SPA out of the BFF when HORIZON_STATIC_DIR points at a
 // directory (Docker image layout: /app/static contains the Vite dist).

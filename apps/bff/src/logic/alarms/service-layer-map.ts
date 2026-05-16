@@ -26,10 +26,10 @@
  * a `listServices` fan-out on every alarms poll.
  */
 
-import { buildOapOpts, graphqlPost } from '../oap/graphql-client.js';
-import type { ConfigSource } from '../config/loader.js';
+import { buildOapOpts, graphqlPost } from '../../client/graphql.js';
+import type { ConfigSource } from '../../config/loader.js';
 import type { FetchLike } from '@skywalking-horizon-ui/api-client';
-import { logger } from '../logger.js';
+import { logger } from '../../logger.js';
 
 interface ServiceLayerMapDeps {
   config: ConfigSource;

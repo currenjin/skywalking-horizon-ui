@@ -39,18 +39,15 @@ import type {
   DashboardWidgetResult,
   FetchLike,
 } from '@skywalking-horizon-ui/api-client';
-import type { ConfigSource } from '../config/loader.js';
-import type { SessionStore } from '../auth/sessions.js';
-import { requireAuth } from '../auth/middleware.js';
-import {  graphqlPost, buildOapOpts } from '../oap/graphql-client.js';
+import type { ConfigSource } from '../../config/loader.js';
+import type { SessionStore } from '../../user/sessions.js';
+import { requireAuth } from '../../user/middleware.js';
+import { graphqlPost, buildOapOpts } from '../../client/graphql.js';
 import {
-  allLayerTemplates,
   getLayerTemplate,
   widgetsForScope,
-  writeLayerTemplate,
-  type LayerTemplate,
-} from '../layers/loader.js';
-import { defaultWidgetsFor } from './defaults.js';
+} from '../../logic/layers/loader.js';
+import { defaultWidgetsFor } from '../../logic/dashboard/defaults.js';
 
 export interface DashboardRouteDeps {
   config: ConfigSource;
@@ -58,7 +55,10 @@ export interface DashboardRouteDeps {
   fetch?: FetchLike;
 }
 
-const widgetSchema = z.object({
+/** Shared with config/layer-template.ts — kept here because the
+ *  runtime POST handler is the canonical user; the admin-template
+ *  schema reuses widgetSchema for nested validation. */
+export const widgetSchema = z.object({
   id: z.string().min(1),
   title: z.string(),
   tip: z.string().optional(),
@@ -83,7 +83,8 @@ const widgetSchema = z.object({
   w: z.number().int().positive().optional(),
   h: z.number().int().positive().optional(),
 });
-const scopeSchema = z.enum([
+/** Shared with config/dashboard.ts (GET-config handler). */
+export const scopeSchema = z.enum([
   'service',
   'instance',
   'endpoint',
@@ -307,7 +308,7 @@ function parseTopList(
   });
 }
 
-export function registerDashboardRoute(app: FastifyInstance, deps: DashboardRouteDeps): void {
+export function registerDashboardQueryRoute(app: FastifyInstance, deps: DashboardRouteDeps): void {
   const auth = requireAuth(deps);
   app.post(
     '/api/layer/:key/dashboard',
@@ -553,145 +554,6 @@ export function registerDashboardRoute(app: FastifyInstance, deps: DashboardRout
       });
 
       return reply.send({ ...baseResp, widgets: results });
-    },
-  );
-
-  // GET version returns the default widget config without running queries —
-  // useful for the SPA to know what to render before invoking POST.
-  // Accepts ?scope=service|instance|endpoint|dependency|topology|trace|logs|traceProfiling|ebpfProfiling|asyncProfiling.
-  app.get(
-    '/api/layer/:key/dashboard/config',
-    { preHandler: auth },
-    async (req: FastifyRequest, reply: FastifyReply) => {
-      const params = req.params as { key: string };
-      const layerKey = params.key;
-      if (!layerKey || !/^[a-z0-9_]+$/i.test(layerKey)) {
-        return reply.code(400).send({ error: 'invalid_layer_key' });
-      }
-      const q = req.query as { scope?: string };
-      const scopeParsed = q.scope ? scopeSchema.safeParse(q.scope) : null;
-      const scope = scopeParsed?.success ? scopeParsed.data : 'service';
-      const tpl = getLayerTemplate(layerKey);
-      const widgets = tpl ? widgetsForScope(tpl, scope) : defaultWidgetsFor(layerKey);
-      return reply.send({ layer: layerKey, scope, widgets });
-    },
-  );
-
-  // Admin: enumerate every loaded JSON layer template. Used by the
-  // /admin/layer-dashboards page to render a layer picker + current
-  // widget set per layer.
-  app.get('/api/admin/layer-templates', { preHandler: auth }, async (_req, reply) => {
-    return reply.send({ templates: allLayerTemplates() });
-  });
-
-  // Admin: persist an operator-edited template back to its JSON file.
-  // Body is the whole template; the BFF rewrites the file and
-  // invalidates its in-memory cache so subsequent reads see the new
-  // shape immediately.
-  const adminTemplateSchema = z.object({
-    key: z.string().regex(/^[A-Z][A-Z0-9_]*$/),
-    alias: z.string().optional(),
-    color: z.string().optional(),
-    documentLink: z.string().optional(),
-    slots: z
-      .object({
-        services: z.string().optional(),
-        instances: z.string().optional(),
-        endpoints: z.string().optional(),
-        endpointDependency: z.string().optional(),
-      })
-      .strict(),
-    components: z
-      .object({
-        service: z.boolean().optional(),
-        instances: z.boolean().optional(),
-        endpoints: z.boolean().optional(),
-        endpointDependency: z.boolean().optional(),
-        topology: z.boolean().optional(),
-        traces: z.boolean().optional(),
-        logs: z.boolean().optional(),
-        traceProfiling: z.boolean().optional(),
-        ebpfProfiling: z.boolean().optional(),
-        asyncProfiling: z.boolean().optional(),
-      })
-      .strict(),
-    metrics: z
-      .object({
-        orderBy: z.string().optional(),
-        columns: z
-          .array(
-            z.object({
-              metric: z.string().min(1),
-              label: z.string(),
-              unit: z.string().optional(),
-              mqe: z.string().optional(),
-              aggregation: z.enum(['sum', 'avg']).optional(),
-              scale: z.number().finite().optional(),
-              precision: z.number().int().min(0).max(6).optional(),
-            }),
-          )
-          .max(5)
-          .optional(),
-      })
-      .strict(),
-    overview: z
-      .object({
-        throughput: z.string().optional(),
-        spark: z.string().optional(),
-      })
-      .strict()
-      .optional(),
-    dashboards: z
-      .object({
-        service: z.array(widgetSchema).max(40).optional(),
-        instance: z.array(widgetSchema).max(40).optional(),
-        endpoint: z.array(widgetSchema).max(40).optional(),
-        dependency: z.array(widgetSchema).max(40).optional(),
-        topology: z.array(widgetSchema).max(40).optional(),
-        trace: z.array(widgetSchema).max(40).optional(),
-        logs: z.array(widgetSchema).max(40).optional(),
-        traceProfiling: z.array(widgetSchema).max(40).optional(),
-        ebpfProfiling: z.array(widgetSchema).max(40).optional(),
-        asyncProfiling: z.array(widgetSchema).max(40).optional(),
-      })
-      .strict()
-      .optional(),
-    widgets: z.array(widgetSchema).max(40).optional(),
-    naming: z
-      .object({
-        pattern: z.string().min(1),
-        flags: z.string().optional(),
-        displayGroup: z.string().optional(),
-        valueGroup: z.string().optional(),
-        alias: z.string().min(1),
-      })
-      .strict()
-      .optional(),
-  });
-
-  app.post(
-    '/api/admin/layer-templates/:key',
-    { preHandler: auth },
-    async (req: FastifyRequest, reply: FastifyReply) => {
-      const params = req.params as { key: string };
-      const layerKey = params.key.toUpperCase();
-      const parsed = adminTemplateSchema.safeParse(req.body);
-      if (!parsed.success) {
-        return reply.code(400).send({ error: 'invalid_template', detail: parsed.error.flatten() });
-      }
-      if (parsed.data.key.toUpperCase() !== layerKey) {
-        return reply.code(400).send({ error: 'key_mismatch', detail: 'URL key does not match body key' });
-      }
-      try {
-        writeLayerTemplate(parsed.data as LayerTemplate);
-      } catch (err) {
-        return reply.code(500).send({
-          error: 'write_failed',
-          detail: err instanceof Error ? err.message : String(err),
-        });
-      }
-      const refreshed = getLayerTemplate(layerKey);
-      return reply.send({ template: refreshed });
     },
   );
 }

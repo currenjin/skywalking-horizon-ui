@@ -32,7 +32,7 @@
  * again.
  */
 
-import { graphqlPost } from './graphql-client.js';
+import { graphqlPost } from '../client/graphql.js';
 import type { FetchLike } from '@skywalking-horizon-ui/api-client';
 
 export type TraceProtocol = 'v2' | 'v3';

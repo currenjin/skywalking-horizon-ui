@@ -21,8 +21,8 @@ import type { AuditLogger } from '../audit/logger.js';
 import { badRequest, unauthorized } from '../errors.js';
 import type { ConfigSource } from '../config/loader.js';
 import { resolveVerbsForRoles } from '../rbac/verbs.js';
-import { verifyLocalCredentials } from './local.js';
-import type { SessionStore } from './sessions.js';
+import { verifyLocalCredentials } from '../user/local.js';
+import type { SessionStore } from '../user/sessions.js';
 
 const loginBodySchema = z.object({
   username: z.string().min(1),

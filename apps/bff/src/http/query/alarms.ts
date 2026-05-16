@@ -40,19 +40,22 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { FetchLike } from '@skywalking-horizon-ui/api-client';
 import { z } from 'zod';
-import { requireAuth } from '../auth/middleware.js';
-import type { ConfigSource } from '../config/loader.js';
-import type { SessionStore } from '../auth/sessions.js';
-import type { AuditLogger } from '../audit/logger.js';
-import { badRequest } from '../errors.js';
-import { buildOapOpts, graphqlPost } from '../oap/graphql-client.js';
-import { ServiceLayerMap } from './service-layer-map.js';
-import type { AlarmsStore, AlarmsConfig } from './store.js';
+import { requireAuth } from '../../user/middleware.js';
+import type { ConfigSource } from '../../config/loader.js';
+import type { SessionStore } from '../../user/sessions.js';
+import { badRequest } from '../../errors.js';
+import { buildOapOpts, graphqlPost } from '../../client/graphql.js';
+import type { ServiceLayerMap } from '../../logic/alarms/service-layer-map.js';
+import type { AlarmsStore } from '../../logic/alarms/store.js';
 
-export interface AlarmsRouteDeps {
+export interface AlarmsQueryRouteDeps {
   config: ConfigSource;
   sessions: SessionStore;
-  audit: AuditLogger;
+  /** Shared with config/alarms.ts so a config save can invalidate
+   *  the cache and the next list call picks up the new layers. */
+  serviceLayer: ServiceLayerMap;
+  /** Used by `/api/alarms/traffic` to read which layers the operator
+   *  configured as traffic backdrops. */
   store: AlarmsStore;
   fetch?: FetchLike;
 }
@@ -322,21 +325,9 @@ const trafficQuerySchema = z.object({
   endTime: z.coerce.number().int().positive(),
 });
 
-const configSaveSchema = z.object({
-  trafficLayers: z
-    .array(
-      z.object({
-        layerKey: z.string().min(1),
-        mqe: z.string().min(1),
-        label: z.string().optional(),
-      }).strict(),
-    )
-    .max(8),
-});
-
-export function registerAlarmsRoutes(app: FastifyInstance, deps: AlarmsRouteDeps): void {
+export function registerAlarmsQueryRoutes(app: FastifyInstance, deps: AlarmsQueryRouteDeps): void {
   const auth = requireAuth(deps);
-  const serviceLayer = new ServiceLayerMap({ config: deps.config, fetch: deps.fetch });
+  const serviceLayer = deps.serviceLayer;
 
   // ── GET /api/alarms ────────────────────────────────────────────────
   app.get('/api/alarms', { preHandler: auth }, async (req: FastifyRequest, reply: FastifyReply) => {
@@ -557,39 +548,6 @@ export function registerAlarmsRoutes(app: FastifyInstance, deps: AlarmsRouteDeps
     },
   );
 
-  // ── GET /api/alarms/config ─────────────────────────────────────────
-  app.get(
-    '/api/alarms/config',
-    { preHandler: auth },
-    async (_req: FastifyRequest, reply: FastifyReply) => {
-      const cfg = await deps.store.load();
-      return reply.send(cfg);
-    },
-  );
-
-  // ── POST /api/alarms/config ────────────────────────────────────────
-  app.post(
-    '/api/alarms/config',
-    { preHandler: auth },
-    async (req: FastifyRequest, reply: FastifyReply) => {
-      const parsed = configSaveSchema.safeParse(req.body);
-      if (!parsed.success) {
-        return reply.code(400).send({ error: 'invalid_body', detail: parsed.error.flatten() });
-      }
-      const next: AlarmsConfig = { trafficLayers: parsed.data.trafficLayers };
-      await deps.store.save(next);
-      serviceLayer.invalidate();
-      deps.audit.record({
-        action: 'alarms.config.save',
-        actor: req.session?.username ?? null,
-        outcome: 'ok',
-        details: { layers: next.trafficLayers.map((l) => `${l.layerKey}:${l.mqe}`) },
-        fromIp: req.ip,
-        sessionId: req.session?.sid,
-      });
-      return reply.send(next);
-    },
-  );
 }
 
 function prettyLayer(key: string): string {

@@ -32,7 +32,7 @@ import type {
   LocalState,
   RuleStatus,
 } from '@skywalking-horizon-ui/api-client';
-import type { OapClients } from './clients.js';
+import type { OapClients } from './index.js';
 
 export interface NodeListResult {
   url: string;

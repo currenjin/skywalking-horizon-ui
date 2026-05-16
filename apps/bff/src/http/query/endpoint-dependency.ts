@@ -29,8 +29,8 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { ConfigSource } from '../config/loader.js';
-import type { SessionStore } from '../auth/sessions.js';
+import type { ConfigSource } from '../../config/loader.js';
+import type { SessionStore } from '../../user/sessions.js';
 import type {
   EndpointDependencyCall,
   EndpointDependencyConfig,
@@ -39,9 +39,9 @@ import type {
   FetchLike,
   TopologyMetricDef,
 } from '@skywalking-horizon-ui/api-client';
-import { requireAuth } from '../auth/middleware.js';
-import {  graphqlPost, buildOapOpts } from './graphql-client.js';
-import { endpointDependencyConfigFor, getLayerTemplate } from '../layers/loader.js';
+import { requireAuth } from '../../user/middleware.js';
+import {  graphqlPost, buildOapOpts } from '../../client/graphql.js';
+import { endpointDependencyConfigFor, getLayerTemplate } from '../../logic/layers/loader.js';
 
 export interface EndpointDependencyRouteDeps {
   config: ConfigSource;

@@ -23,11 +23,11 @@ import type {
   LayerSlots,
   MenuResponse,
 } from '@skywalking-horizon-ui/api-client';
-import type { ConfigSource } from '../config/loader.js';
-import type { SessionStore } from '../auth/sessions.js';
-import { requireAuth } from '../auth/middleware.js';
-import { buildOapOpts, graphqlPost, type GraphqlOptions } from './graphql-client.js';
-import { getLayerTemplate, type LayerComponentFlags } from '../layers/loader.js';
+import type { ConfigSource } from '../../config/loader.js';
+import type { SessionStore } from '../../user/sessions.js';
+import { requireAuth } from '../../user/middleware.js';
+import { buildOapOpts, graphqlPost, type GraphqlOptions } from '../../client/graphql.js';
+import { getLayerTemplate, type LayerComponentFlags } from '../../logic/layers/loader.js';
 
 /**
  * Map the JSON config's `components.*` flags onto the wire `caps`
@@ -253,7 +253,7 @@ async function fetchCountsForLayers(
 }
 
 // Local re-import to avoid a circular dep — graphqlPost is in the same dir.
-import { graphqlPost as graphqlPostShim } from './graphql-client.js';
+import { graphqlPost as graphqlPostShim } from '../../client/graphql.js';
 
 export function registerMenuRoute(app: FastifyInstance, deps: MenuRouteDeps): void {
   const auth = requireAuth(deps);

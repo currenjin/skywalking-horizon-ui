@@ -34,7 +34,7 @@
 import type { FastifyReply } from 'fastify';
 import type { FetchLike, ExpressionResult, MqeEntity } from '@skywalking-horizon-ui/api-client';
 import { INSPECT_STEPS, isInspectDate, type InspectStep } from '@skywalking-horizon-ui/api-client';
-import type { MqeTarget } from './mqe-target.js';
+import type { MqeTarget } from '../../util/mqe-target.js';
 
 interface DurationInput {
   start: string;

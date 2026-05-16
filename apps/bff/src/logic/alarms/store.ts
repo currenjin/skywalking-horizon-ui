@@ -32,7 +32,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { logger } from '../logger.js';
+import { logger } from '../../logger.js';
 
 /** One background-traffic series the alarms timeline renders. */
 export interface AlarmTrafficLayer {

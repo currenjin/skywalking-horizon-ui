@@ -50,16 +50,16 @@ import {
   type InspectMetricType,
   type InspectStep,
 } from '@skywalking-horizon-ui/api-client';
-import type { ConfigSource } from '../config/loader.js';
-import type { AuditLogger } from '../audit/logger.js';
-import { requireAuth } from '../auth/middleware.js';
-import { sessionHasVerb } from '../rbac/policy.js';
-import type { Session, SessionStore } from '../auth/sessions.js';
-import { buildOapClients, type OapClients } from './clients.js';
-import { AttributionCache, attributeOrUnknown } from '../inspect/attribution.js';
-import { MqeTargetCache } from './mqe-target.js';
-import { parseExecBody, fireMqe, MqeFireError } from './inspect-exec.js';
-import { ServerTimeCache } from './server-time.js';
+import type { ConfigSource } from '../../config/loader.js';
+import type { AuditLogger } from '../../audit/logger.js';
+import { requireAuth } from '../../user/middleware.js';
+import { sessionHasVerb } from '../../rbac/policy.js';
+import type { Session, SessionStore } from '../../user/sessions.js';
+import { buildOapClients, type OapClients } from '../../client/index.js';
+import { AttributionCache, attributeOrUnknown } from '../../logic/inspect/attribution.js';
+import { MqeTargetCache } from '../../util/mqe-target.js';
+import { parseExecBody, fireMqe, MqeFireError } from '../../logic/inspect/exec.js';
+import { ServerTimeCache } from '../../util/time.js';
 
 export interface InspectRouteDeps {
   config: ConfigSource;

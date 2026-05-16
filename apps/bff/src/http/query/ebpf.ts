@@ -44,10 +44,10 @@ import type {
   NetworkProfilingKeepAliveResponse,
   ProcessTopologyResponse,
 } from '@skywalking-horizon-ui/api-client';
-import type { ConfigSource } from '../config/loader.js';
-import type { SessionStore } from '../auth/sessions.js';
-import { requireAuth } from '../auth/middleware.js';
-import { graphqlPost, buildOapOpts } from './graphql-client.js';
+import type { ConfigSource } from '../../config/loader.js';
+import type { SessionStore } from '../../user/sessions.js';
+import { requireAuth } from '../../user/middleware.js';
+import { graphqlPost, buildOapOpts } from '../../client/graphql.js';
 
 export interface EBPFRouteDeps {
   config: ConfigSource;

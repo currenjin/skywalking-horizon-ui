@@ -17,10 +17,10 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { FetchLike } from '@skywalking-horizon-ui/api-client';
-import type { ConfigSource } from '../config/loader.js';
-import { requireAuth } from '../auth/middleware.js';
-import type { SessionStore } from '../auth/sessions.js';
-import { runPreflight } from './preflight.js';
+import type { ConfigSource } from '../../config/loader.js';
+import { requireAuth } from '../../user/middleware.js';
+import type { SessionStore } from '../../user/sessions.js';
+import { runPreflight } from '../../logic/preflight/preflight.js';
 
 export interface PreflightRouteDeps {
   config: ConfigSource;

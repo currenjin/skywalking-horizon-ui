@@ -17,8 +17,8 @@
 
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { forbidden, unauthorized } from '../errors.js';
-import type { Session } from '../auth/sessions.js';
-import type { SessionStore } from '../auth/sessions.js';
+import type { Session } from '../user/sessions.js';
+import type { SessionStore } from '../user/sessions.js';
 import type { ConfigSource } from '../config/loader.js';
 import type { HorizonConfig } from '../config/schema.js';
 import { hasVerb, resolveVerbsForRoles, type Verb } from './verbs.js';

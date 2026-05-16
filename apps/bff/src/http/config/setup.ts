@@ -18,12 +18,12 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { SetupResponse, SetupSavePayload } from '@skywalking-horizon-ui/api-client';
-import type { AuditLogger } from '../audit/logger.js';
-import { requireAuth } from '../auth/middleware.js';
-import type { ConfigSource } from '../config/loader.js';
-import type { SessionStore } from '../auth/sessions.js';
-import { badRequest } from '../errors.js';
-import type { SetupStore } from './store.js';
+import type { AuditLogger } from '../../audit/logger.js';
+import { requireAuth } from '../../user/middleware.js';
+import type { ConfigSource } from '../../config/loader.js';
+import type { SessionStore } from '../../user/sessions.js';
+import { badRequest } from '../../errors.js';
+import type { SetupStore } from '../../logic/setup/store.js';
 
 export interface SetupRouteDeps {
   config: ConfigSource;

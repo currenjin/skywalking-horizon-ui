@@ -47,13 +47,13 @@ import type {
   ZipkinTraceDetailResponse,
   ZipkinTraceListResponse,
 } from '@skywalking-horizon-ui/api-client';
-import type { ConfigSource } from '../config/loader.js';
-import type { SessionStore } from '../auth/sessions.js';
-import { requireAuth } from '../auth/middleware.js';
-import {  graphqlPost, buildOapOpts, type GraphqlOptions } from './graphql-client.js';
-import { getLayerTemplate, tracesConfigFor } from '../layers/loader.js';
-import { detectTraceProtocol } from './trace-protocol-cache.js';
-import { zipkinFetchTraces, zipkinFetchTraceById, summariseZipkinTrace } from './zipkin-client.js';
+import type { ConfigSource } from '../../config/loader.js';
+import type { SessionStore } from '../../user/sessions.js';
+import { requireAuth } from '../../user/middleware.js';
+import {  graphqlPost, buildOapOpts, type GraphqlOptions } from '../../client/graphql.js';
+import { getLayerTemplate, tracesConfigFor } from '../../logic/layers/loader.js';
+import { detectTraceProtocol } from '../../util/trace-protocol-cache.js';
+import { zipkinFetchTraces, zipkinFetchTraceById, summariseZipkinTrace } from '../../client/zipkin.js';
 
 export interface TraceRouteDeps {
   config: ConfigSource;

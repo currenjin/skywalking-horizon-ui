@@ -36,7 +36,7 @@ import type {
   PreflightModule,
   PreflightResult,
 } from '@skywalking-horizon-ui/api-client';
-import type { HorizonConfig } from '../config/schema.js';
+import type { HorizonConfig } from '../../config/schema.js';
 
 export type { PreflightModule, PreflightResult };
 

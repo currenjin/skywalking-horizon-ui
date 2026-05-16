@@ -84,10 +84,6 @@ async function submit(): Promise<void> {
       <button class="sw-btn is-primary submit" type="submit" :disabled="submitting">
         {{ submitting ? 'Signing in…' : 'Sign in' }}
       </button>
-
-      <div class="foot">
-        Local + LDAP auth. OIDC and SSO are out of scope for v1.
-      </div>
     </form>
   </div>
 </template>
@@ -180,12 +176,5 @@ async function submit(): Promise<void> {
 .submit:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-}
-.foot {
-  margin-top: 18px;
-  font-size: 11px;
-  color: var(--sw-fg-3);
-  text-align: center;
-  line-height: 1.5;
 }
 </style>
