@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "type-check": "vue-tsc --noEmit",
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --ignore-path ../../.gitignore",
-    "test:unit": "vitest --environment jsdom --root src/"
+    "test:unit": "vitest run --environment jsdom --root src/",
+    "test:unit:watch": "vitest --environment jsdom --root src/"
   },
   "dependencies": {
     "@skywalking-horizon-ui/api-client": "workspace:*",

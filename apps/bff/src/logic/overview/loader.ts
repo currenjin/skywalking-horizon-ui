@@ -35,12 +35,25 @@ import type {
 } from '@skywalking-horizon-ui/api-client';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// Bundled overview dashboards live under `bundled_templates/overviews/`
-// (sibling to `bundled_templates/layers/`). Co-locating the static
-// templates keeps the future "operator-editable / OAP-served" migration
-// to one directory swap. Two levels up from logic/overview/ to reach
-// apps/bff/src/.
-const CONFIG_DIR = path.join(__dirname, '..', '..', 'bundled_templates', 'overviews');
+/** Mirrors the dev-vs-prod path probing in `logic/layers/loader.ts`
+ *  — see that file for the rationale. */
+function locateConfigDir(): string {
+  const candidates = [
+    path.join(__dirname, '..', '..', 'bundled_templates', 'overviews'),
+    path.join(__dirname, '..', 'bundled_templates', 'overviews'),
+    path.join(process.cwd(), 'bundled_templates', 'overviews'),
+  ];
+  for (const dir of candidates) {
+    try {
+      fs.readdirSync(dir);
+      return dir;
+    } catch {
+      /* try next */
+    }
+  }
+  return candidates[0];
+}
+const CONFIG_DIR = locateConfigDir();
 
 let cache: OverviewDashboard[] | null = null;
 

@@ -10,7 +10,8 @@
     "cli:hash": "tsx src/cli/hash.ts",
     "type-check": "tsc --noEmit",
     "lint": "eslint . --ext .ts,.cjs,.mjs --fix --ignore-path ../../.gitignore",
-    "test:unit": "vitest --root src/"
+    "test:unit": "vitest run --root src/",
+    "test:unit:watch": "vitest --root src/"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.1",

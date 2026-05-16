@@ -306,12 +306,37 @@ export const BOOSTER_ENDPOINT_DEP_DEFAULTS: EndpointDependencyConfig = {
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// Bundled layer JSONs live alongside other static templates under
-// `apps/bff/src/bundled_templates/`. In the long run these should be
-// served by OAP; for now they ship inside the BFF so a fresh deploy
-// renders something sensible without any operator setup. Two levels
-// up from logic/layers/ to reach apps/bff/src/.
-const CONFIG_DIR = join(__dirname, '..', '..', 'bundled_templates', 'layers');
+/** Locate bundled_templates/layers/ at runtime.
+ *
+ *   - **Dev** (tsx-watched source files): this file lives at
+ *     `apps/bff/src/logic/layers/loader.ts`, so two `..` reaches
+ *     `apps/bff/src/bundled_templates/`.
+ *   - **Prod** (esbuild bundle): every import collapses into
+ *     `/app/dist/server.js`, so `__dirname` is `/app/dist/` and only
+ *     one `..` reaches the Dockerfile's `/app/bundled_templates/`.
+ *
+ *   We probe candidates in order — first existing wins. `process.cwd()`
+ *   is the last fallback for operators running the bundle from an
+ *   arbitrary working dir with the templates beside them. */
+function locateConfigDir(): string {
+  const candidates = [
+    join(__dirname, '..', '..', 'bundled_templates', 'layers'),
+    join(__dirname, '..', 'bundled_templates', 'layers'),
+    join(process.cwd(), 'bundled_templates', 'layers'),
+  ];
+  for (const dir of candidates) {
+    try {
+      readdirSync(dir);
+      return dir;
+    } catch {
+      /* try next */
+    }
+  }
+  // Last-resort default — first candidate. The first readdir of an
+  // empty result will surface the underlying ENOENT to the operator.
+  return candidates[0];
+}
+const CONFIG_DIR = locateConfigDir();
 
 let cache: Map<string, LayerTemplate> | null = null;
 
