@@ -38,6 +38,7 @@ import { useLayerEndpoints } from '@/layer/useLayerEndpoints';
 import { useLayerInstances } from '@/layer/useLayerInstances';
 import { useLayerLanding } from '@/layer/useLayerLanding';
 import { useTimeRangeStore } from '@/controls/timeRange';
+import { pushEvent } from '@/controls/eventLog';
 import { useLayers } from '@/shell/useLayers';
 import { useSelectedEndpoint } from '@/layer/useSelectedEndpoint';
 import { useSelectedInstance } from '@/layer/useSelectedInstance';
@@ -98,20 +99,6 @@ const serviceName = computed<string | null>(() => {
   const match = rows.find((r) => r.serviceId === selectedId.value);
   return match?.serviceName ?? null;
 });
-/**
- * Service handle used for downstream picker queries (instance list,
- * endpoint list, dashboard widgets). The landing route resolves
- * `selectedId` → `serviceName` once its row sample arrives, which can
- * take a moment on first paint. The BFF picker / dashboard routes
- * accept either a name OR an id, so we fire those queries with
- * `selectedId` immediately and let `serviceName` overtake when ready.
- * Avoids the "instance list empty for a beat after landing" hiccup
- * the operator reported.
- */
-const serviceHandle = computed<string | null>(
-  () => serviceName.value ?? selectedId.value ?? null,
-);
-
 // Dev-only escape hatch: appending `?mockTop=10` to the page URL pads
 // every TopList result to N synthetic rows. Helps operators verify
 // widget heights without waiting for OAP to populate the layer.
@@ -129,9 +116,12 @@ const { config, isLoading: configLoading } = useLayerDashboardConfig(layerKey, s
 // Cleared automatically when the service changes so a stale instance
 // from a previous service doesn't bleed into the next one's queries.
 const { selectedInstance, setSelectedInstance } = useSelectedInstance();
+// Instance list waits for `serviceName` (post-landing), not the URL
+// id fallback. Enforces the cascade: landing → service → instance →
+// metrics, each step firing exactly once after the prior resolves.
 const { instances: instanceList, isFetching: instancesLoading } = useLayerInstances(
   layerKey,
-  serviceHandle,
+  serviceName,
 );
 /** Track which row's attributes panel is open. Mutually exclusive —
  *  expanding one collapses the previous so the list stays compact. */
@@ -151,7 +141,21 @@ const landingRows = computed(() => landing.data.value?.sampledRows ?? landing.ro
 watch(landingRows, (rows) => {
   const first = rows[0];
   if (!first) return;
-  if (!selectedId.value || !rows.some((r) => r.serviceId === selectedId.value)) {
+  // First-visit (no ?service= in URL) → quietly auto-pick. Stale
+  // URL pick (id present but not in the layer) → log a debug
+  // event so the operator sees the fallback in the event panel,
+  // THEN auto-pick. Distinguishes the two so the silent default
+  // isn't conflated with a fallback in the timeline.
+  if (!selectedId.value) {
+    setSelectedService(first.serviceId);
+    return;
+  }
+  if (!rows.some((r) => r.serviceId === selectedId.value)) {
+    pushEvent(
+      'fallback',
+      'info',
+      `URL service "${selectedId.value}" not in ${layerKey.value} · falling back to "${first.serviceName}"`,
+    );
     setSelectedService(first.serviceId);
   }
 }, { immediate: true });
@@ -181,7 +185,17 @@ watch([instanceList, scope], ([list, s]) => {
   // the picker's own empty state handles it and the dashboard
   // gate keeps the widget batch quiet.
   if (list.length === 0) return;
-  if (!selectedInstance.value || !list.some((i) => i.name === selectedInstance.value)) {
+  // Quiet default (no URL pick) vs noted fallback (stale URL pick).
+  if (!selectedInstance.value) {
+    setSelectedInstance(list[0].name);
+    return;
+  }
+  if (!list.some((i) => i.name === selectedInstance.value)) {
+    pushEvent(
+      'fallback',
+      'info',
+      `URL instance "${selectedInstance.value}" not in ${serviceName.value} · falling back to "${list[0].name}"`,
+    );
     setSelectedInstance(list[0].name);
   }
 }, { immediate: true });
@@ -205,9 +219,11 @@ function clearEndpointSearch(): void {
   endpointSearchInput.value = '';
   endpointQuery.value = '';
 }
+// Same cascade-strict rule as instance list — endpoint list
+// waits for `serviceName` (post-landing), not the URL handle.
 const { endpoints: endpointList, isFetching: endpointsLoading } = useLayerEndpoints(
   layerKey,
-  serviceHandle,
+  serviceName,
   endpointQuery,
   endpointLimit,
 );
@@ -229,10 +245,24 @@ watchEffect(() => {
     if (first) setSelectedService(first.serviceId);
     return;
   }
-  if (selectedEndpoint.value) return;
   if (endpointsLoading.value) return;
-  const first = endpointList.value[0];
-  if (first) setSelectedEndpoint(first.name);
+  const list = endpointList.value;
+  if (list.length === 0) return;
+  // Quiet default (no URL pick) vs noted fallback (URL endpoint not
+  // in the resolved list — log a debug event so the operator sees
+  // the fallback).
+  if (!selectedEndpoint.value) {
+    setSelectedEndpoint(list[0].name);
+    return;
+  }
+  if (!list.some((e) => e.name === selectedEndpoint.value)) {
+    pushEvent(
+      'fallback',
+      'info',
+      `URL endpoint "${selectedEndpoint.value}" not in ${serviceName.value} · falling back to "${list[0].name}"`,
+    );
+    setSelectedEndpoint(list[0].name);
+  }
 });
 // Drop stale endpoint when service changes.
 watch(serviceName, (next, prev) => {
@@ -415,24 +445,26 @@ function isVisible(
     <section v-if="scope === 'instance'" class="instance-bar sw-card">
       <header class="ib-head">
         <span class="kicker">Instance</span>
-        <span v-if="serviceHandle" class="for-svc">
-          for <b>{{ serviceName ?? serviceHandle }}</b>
+        <!-- Header strictly tracks the resolved `serviceName` —
+             never the raw `?service=` base64 id from the URL.
+             While landing is still loading we show a loading hint
+             instead, matching the cascade-clear-then-load
+             principle (downstream waits for upstream). -->
+        <span v-if="serviceName" class="for-svc">
+          for <b>{{ serviceName }}</b>
           <span v-if="instanceList.length > 0" class="count">{{ instanceList.length }}</span>
         </span>
-        <span v-if="instancesLoading" class="hint">loading…</span>
+        <span v-else-if="selectedId" class="hint">resolving service…</span>
+        <span v-if="instancesLoading" class="hint">loading instances…</span>
       </header>
-      <!-- Empty-state gate keys off `serviceHandle` (URL pick OR
-           resolved name) not just `serviceName`. On a hard refresh,
-           landing hasn't returned yet so `serviceName` is null, but
-           `serviceHandle` already has the URL service id and the
-           instance query has already fired against it — so we
-           render the list right away instead of flashing "Pick a
-           service" while the list IS in fact loading. -->
-      <div v-if="!serviceHandle" class="empty inline">
+      <div v-if="!selectedId" class="empty inline">
         Pick a service in the picker above to list its instances.
       </div>
+      <div v-else-if="!serviceName" class="empty inline">
+        Resolving service…
+      </div>
       <div v-else-if="!instancesLoading && instanceList.length === 0" class="empty inline">
-        No active instances reported for {{ serviceName ?? serviceHandle }} in the last 15 minutes.
+        No active instances reported for {{ serviceName }} in the last 15 minutes.
       </div>
       <ul v-else class="ib-list">
         <li
@@ -476,19 +508,20 @@ function isVisible(
     <section v-if="scope === 'endpoint'" class="instance-bar sw-card">
       <header class="ib-head">
         <span class="kicker">Endpoint</span>
-        <span v-if="serviceHandle" class="for-svc">
-          for <b>{{ serviceName ?? serviceHandle }}</b>
+        <!-- Strictly serviceName, no base64-id fallback (same rule
+             as the instance picker above). -->
+        <span v-if="serviceName" class="for-svc">
+          for <b>{{ serviceName }}</b>
           <span v-if="endpointList.length > 0" class="count">{{ endpointList.length }}</span>
         </span>
-        <span v-if="endpointsLoading" class="hint">loading…</span>
+        <span v-else-if="selectedId" class="hint">resolving service…</span>
+        <span v-if="endpointsLoading" class="hint">loading endpoints…</span>
       </header>
-      <!-- Same fix as the instance picker above: gate on the URL
-           service handle (id or name), not the post-landing
-           resolved name, so a hard refresh doesn't flash a "Pick a
-           service" empty state while the endpoint query is already
-           in flight against the URL id. -->
-      <div v-if="!serviceHandle" class="empty inline">
+      <div v-if="!selectedId" class="empty inline">
         Pick a service in the picker above to search its endpoints.
+      </div>
+      <div v-else-if="!serviceName" class="empty inline">
+        Resolving service…
       </div>
       <template v-else>
         <div class="ep-controls">
