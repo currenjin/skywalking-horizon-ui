@@ -15,15 +15,16 @@
   limitations under the License.
 -->
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { computed, onMounted } from 'vue';
 import { RouterView } from 'vue-router';
 import AppSidebar from './AppSidebar.vue';
 import AppTopbar from './AppTopbar.vue';
 import GlobalConnectivityBanner from './GlobalConnectivityBanner.vue';
 import TracePopout from '@/layer/traces/TracePopout.vue';
 import ZipkinTracePopout from '@/layer/traces/ZipkinTracePopout.vue';
-import { ensureConfigBundle } from '@/controls/configBundle';
+import { ensureConfigBundle, useConfigBundle } from '@/controls/configBundle';
 import { useClickTracking } from '@/controls/useClickTracking';
+import { useLayers } from '@/shell/useLayers';
 
 // Kick the config preload once the shell mounts (i.e. after the auth
 // guard has let the user through). All layer dashboard configs +
@@ -39,6 +40,24 @@ onMounted(() => {
 // each framework load. See `controls/useClickTracking.ts` for the
 // suppression rules (the ticker itself, form inputs, decorative bits).
 useClickTracking();
+
+// Init gate. The main zone (RouterView) waits until BOTH the layer
+// registry and the dashboard-config bundle have settled, so on a
+// login → deep-URL redirect the user sees a single shell-level
+// "initializing…" placeholder instead of every page rendering
+// against empty layer state and flashing its own "not found"
+// fallback. We treat an OAP-unreachable settle as "ready" too — the
+// app proceeds in degraded mode and GlobalConnectivityBanner takes
+// over the messaging. The sidebar + topbar stay mounted throughout
+// so the EventTicker can stream init progress.
+const { layers, isLoading: layersLoading, isError: layersError } = useLayers();
+const { loaded: bundleLoaded } = useConfigBundle();
+const menuSettled = computed<boolean>(
+  () => !layersLoading.value && (layers.value.length > 0 || layersError.value),
+);
+const initReady = computed<boolean>(
+  () => menuSettled.value && bundleLoaded.value,
+);
 </script>
 
 <template>
@@ -50,7 +69,16 @@ useClickTracking();
            (`:12800`) poll reports unreachable. Admin-port (`:17128`)
            failures render per-page via AdminFeatureWarning, not here. -->
       <GlobalConnectivityBanner />
-      <RouterView />
+      <!-- Shell-level init placeholder. Visible until the layer
+           registry + config bundle have both loaded. Per-page code
+           runs against fully-populated state from the first paint. -->
+      <div v-if="!initReady" class="sw-init">
+        <div class="sw-card sw-init-card">
+          <h2>Initializing…</h2>
+          <p>Loading layer registry and dashboard templates. Watch the topbar event line for progress.</p>
+        </div>
+      </div>
+      <RouterView v-else />
     </main>
     <!-- Global trace-id popout: any page can call useTracePopout().openTrace(id)
          and this modal renders the waterfall + span detail. -->
@@ -62,3 +90,27 @@ useClickTracking();
     <ZipkinTracePopout />
   </div>
 </template>
+
+<style scoped>
+.sw-init {
+  padding: 48px 20px;
+  display: flex;
+  justify-content: center;
+}
+.sw-init-card {
+  max-width: 480px;
+  padding: 24px 28px;
+  text-align: center;
+}
+.sw-init-card h2 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  color: var(--sw-fg-0);
+}
+.sw-init-card p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--sw-fg-2);
+  line-height: 1.5;
+}
+</style>
