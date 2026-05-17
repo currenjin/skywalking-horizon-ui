@@ -373,17 +373,24 @@ function isVisible(
     <section v-if="scope === 'instance'" class="instance-bar sw-card">
       <header class="ib-head">
         <span class="kicker">Instance</span>
-        <span v-if="serviceName" class="for-svc">
-          for <b>{{ serviceName }}</b>
+        <span v-if="serviceHandle" class="for-svc">
+          for <b>{{ serviceName ?? serviceHandle }}</b>
           <span v-if="instanceList.length > 0" class="count">{{ instanceList.length }}</span>
         </span>
         <span v-if="instancesLoading" class="hint">loading…</span>
       </header>
-      <div v-if="!serviceName" class="empty inline">
+      <!-- Empty-state gate keys off `serviceHandle` (URL pick OR
+           resolved name) not just `serviceName`. On a hard refresh,
+           landing hasn't returned yet so `serviceName` is null, but
+           `serviceHandle` already has the URL service id and the
+           instance query has already fired against it — so we
+           render the list right away instead of flashing "Pick a
+           service" while the list IS in fact loading. -->
+      <div v-if="!serviceHandle" class="empty inline">
         Pick a service in the picker above to list its instances.
       </div>
       <div v-else-if="!instancesLoading && instanceList.length === 0" class="empty inline">
-        No active instances reported for {{ serviceName }} in the last 15 minutes.
+        No active instances reported for {{ serviceName ?? serviceHandle }} in the last 15 minutes.
       </div>
       <ul v-else class="ib-list">
         <li
@@ -427,13 +434,18 @@ function isVisible(
     <section v-if="scope === 'endpoint'" class="instance-bar sw-card">
       <header class="ib-head">
         <span class="kicker">Endpoint</span>
-        <span v-if="serviceName" class="for-svc">
-          for <b>{{ serviceName }}</b>
+        <span v-if="serviceHandle" class="for-svc">
+          for <b>{{ serviceName ?? serviceHandle }}</b>
           <span v-if="endpointList.length > 0" class="count">{{ endpointList.length }}</span>
         </span>
         <span v-if="endpointsLoading" class="hint">loading…</span>
       </header>
-      <div v-if="!serviceName" class="empty inline">
+      <!-- Same fix as the instance picker above: gate on the URL
+           service handle (id or name), not the post-landing
+           resolved name, so a hard refresh doesn't flash a "Pick a
+           service" empty state while the endpoint query is already
+           in flight against the URL id. -->
+      <div v-if="!serviceHandle" class="empty inline">
         Pick a service in the picker above to search its endpoints.
       </div>
       <template v-else>
