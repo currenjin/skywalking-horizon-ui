@@ -272,8 +272,34 @@ useLayerPageOrchestrator({
 });
 
 const widgets = computed(() => config.value?.widgets ?? []);
+
+// Cascade-clear-then-load: track whether the dashboard data on hand
+// actually matches the current selection. The moment an upstream
+// pick (service / instance / endpoint / scope / range) changes, we
+// flip to "stale" and the template's "Reading data…" gate fires
+// even if vue-query is still surfacing the previous key's data
+// during the fetch (cache hit OR background fetch). When the new
+// query resolves, the data ref updates and we mark fresh again.
+// This is what makes the page visibly reset on click rather than
+// looking frozen on the prior widgets.
+const fetchKey = computed(
+  () =>
+    `${layerKey.value}|${scope.value}|${serviceName.value ?? ''}|${selectedInstance.value ?? ''}|${selectedEndpoint.value ?? ''}|${timeRange.range.startMs}|${timeRange.range.endMs}|${timeRange.step}`,
+);
+const lastFreshKey = ref<string | null>(null);
+watch(data, (d) => {
+  if (d !== null && d !== undefined) {
+    lastFreshKey.value = fetchKey.value;
+  }
+});
+const dataIsFresh = computed(() => lastFreshKey.value === fetchKey.value);
+
 const resultsById = computed(() => {
   const out = new Map<string, NonNullable<typeof data.value>['widgets'][number]>();
+  // Only surface widget results from a response that matches the
+  // current selection — otherwise we'd briefly render prior-key
+  // values under the new picker state.
+  if (!dataIsFresh.value) return out;
   for (const r of data.value?.widgets ?? []) out.set(r.id, r);
   return out;
 });
@@ -554,7 +580,7 @@ function isVisible(
          cards. Once `data` arrives, the grid takes over and shows
          each widget's value / no-data / error normally. Background
          refetches keep showing the prior data, no flash. -->
-    <div v-else-if="data === null && reachable" class="empty reading">
+    <div v-else-if="!dataIsFresh && reachable" class="empty reading">
       <span class="reading-dot" /> Reading data…
     </div>
     <div v-else class="grid">
