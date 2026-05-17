@@ -26,6 +26,7 @@
 import { computed, type Ref } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
 import { bffClient } from '@/api/client';
+import { pushEvent } from '@/controls/eventLog';
 
 export function useLayerEndpoints(
   layerKey: Ref<string>,
@@ -35,8 +36,19 @@ export function useLayerEndpoints(
 ) {
   const q = useQuery({
     queryKey: ['layer-endpoints', layerKey, service, query, limit],
-    queryFn: () =>
-      bffClient.layer.endpoints(layerKey.value, service.value ?? '', query.value, limit.value),
+    queryFn: async () => {
+      const label = query.value ? `"${query.value}"` : 'top';
+      pushEvent('endpoints', 'start', `Loading endpoints (${label}) for ${service.value}…`);
+      try {
+        const r = await bffClient.layer.endpoints(layerKey.value, service.value ?? '', query.value, limit.value);
+        const n = r.endpoints?.length ?? 0;
+        pushEvent('endpoints', 'ok', `Loaded ${n} endpoint${n === 1 ? '' : 's'}`);
+        return r;
+      } catch (err) {
+        pushEvent('endpoints', 'err', `Endpoint list failed: ${err instanceof Error ? err.message : String(err)}`);
+        throw err;
+      }
+    },
     enabled: computed(() => layerKey.value.length > 0 && !!service.value),
     staleTime: 30_000,
   });

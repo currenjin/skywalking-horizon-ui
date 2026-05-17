@@ -16,6 +16,7 @@
  */
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
 import { useAuthStore } from '@/state/auth';
+import { pushEvent, resetEventLog } from '@/controls/eventLog';
 
 const placeholder = () => import('@/shell/PlaceholderView.vue');
 
@@ -234,6 +235,16 @@ router.beforeEach(async (to) => {
   if (to.name === 'login' && auth.isAuthenticated) {
     return { path: '/' };
   }
+});
+
+// Every successful navigation clears the event log + posts a single
+// "Navigated to X" line so the topbar EventTicker shows what page the
+// operator just opened. Subsequent data loaders push their own start /
+// ok / err events on top of this baseline.
+router.afterEach((to, from) => {
+  if (to.path === from.path) return;
+  resetEventLog();
+  pushEvent('route', 'info', `Navigated to ${to.path}`);
 });
 
 export default router;

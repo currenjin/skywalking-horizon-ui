@@ -18,75 +18,14 @@
 import { computed, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import Icon from '@/components/icons/Icon.vue';
+import EventTicker from '@/shell/EventTicker.vue';
 import { useOapInfo } from '@/shell/useOapInfo';
-import { useLayers } from '@/shell/useLayers';
 import { useAutoRefreshStore } from '@/controls/autoRefresh';
 import { useTimeRangeStore, TIME_PRESETS, STEP_LIMITS, isValidRange, type TimeStep } from '@/controls/timeRange';
 
 const route = useRoute();
-const { layers } = useLayers();
 
-/**
- * Breadcrumb derived from the route path PLUS the layer's display
- * config so the trail reads the same as the sidebar. For
- * `/layer/<key>/<scope>` we:
- *   - Replace the layer key with its alias (`activemq` → `ActiveMQ`).
- *   - Replace the scope segment with the layer's slot alias when one
- *     exists (`instance` → `Brokers` for ActiveMQ, `Sidecars` for
- *     mesh_dp, `Pages` for browser, …). Falls back to the
- *     capitalized URL segment when no alias applies.
- *
- * The mapping lives here (and not in the route definition) because
- * the layer JSON is the source of truth for the operator-facing
- * terms; the route segments stay in the canonical `instance` /
- * `endpoint` / etc. shape for back-compat with bookmarks.
- */
-const SCOPE_SLOT_KEY: Record<string, 'instances' | 'endpoints' | 'services' | 'endpointDependency'> = {
-  instance: 'instances',
-  endpoint: 'endpoints',
-  service: 'services',
-  dependency: 'endpointDependency',
-};
-const SCOPE_LITERAL: Record<string, string> = {
-  topology: 'Topology',
-  trace: 'Traces',
-  logs: 'Logs',
-  'trace-profiling': 'Trace Profiling',
-  'ebpf-profiling': 'eBPF Profiling',
-  'async-profiling': 'Async Profiling',
-  'network-profiling': 'Network Profiling',
-  pprof: 'pprof (Go)',
-};
-const crumbs = computed<string[]>(() => {
-  const segs = route.path.split('/').filter(Boolean);
-  if (segs.length === 0) return ['Home'];
-  // Layer-aware path: `/layer/<key>/<scope?>/...`
-  if (segs[0] === 'layer' && segs[1]) {
-    const layerKey = segs[1];
-    const layer = layers.value.find((l) => l.key === layerKey);
-    const out: string[] = [layer?.name ?? layerKey.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase())];
-    for (let i = 2; i < segs.length; i++) {
-      const seg = segs[i];
-      // Slot alias (services/instances/endpoints/dependency).
-      const slotKey = SCOPE_SLOT_KEY[seg];
-      if (slotKey && layer?.slots?.[slotKey]) {
-        out.push(String(layer.slots[slotKey]));
-        continue;
-      }
-      // Known literal scope (topology / trace / logs / profilings).
-      if (SCOPE_LITERAL[seg]) {
-        out.push(SCOPE_LITERAL[seg]);
-        continue;
-      }
-      // Fallback: capitalize the segment.
-      out.push(seg.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase()));
-    }
-    return out;
-  }
-  return segs.map((s) => s.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase()));
-});
-
-const { info, reachable, version, tzOffsetLabel, healthState } = useOapInfo();
+const { info, reachable, tzOffsetLabel, healthState } = useOapInfo();
 
 const oapChipTooltip = computed<string>(() => {
   if (!info.value) return 'OAP status — loading…';
@@ -386,23 +325,15 @@ function formatRangeStamp(ms: number, step: TimeStep): string {
 
 <template>
   <header class="sw-top">
-    <div class="sw-crumbs">
-      <template v-for="(c, i) in crumbs" :key="i">
-        <Icon v-if="i > 0" name="chev" :size="10" />
-        <b v-if="i === crumbs.length - 1">{{ c }}</b>
-        <span v-else>{{ c }}</span>
-      </template>
-    </div>
-    <div class="sw-top-search">
-      <Icon name="search" :size="12" />
-      <span>Search services, endpoints, traceId&hellip;</span>
-      <kbd>⌘K</kbd>
-    </div>
+    <!-- Event ticker replaces the old breadcrumb + search. Shows what
+         the framework is currently doing (loading services, rendering
+         widgets, …) so the operator gets feedback while the page
+         assembles instead of looking at a static breadcrumb. -->
+    <EventTicker />
     <div class="sw-top-actions">
       <RouterLink class="sw-btn oap-chip" :class="`is-${healthState}`" :title="oapChipTooltip" to="/operate/cluster">
         <span class="dot" />
-        <span v-if="reachable && version" class="ver">v{{ version }}</span>
-        <span v-else-if="reachable" class="ver">OAP</span>
+        <span v-if="reachable" class="ver">OAP</span>
         <span v-else class="ver">offline</span>
         <span v-if="reachable && tzOffsetLabel" class="tz" :class="{ mismatch: tzMismatch }">
           {{ tzOffsetLabel }}

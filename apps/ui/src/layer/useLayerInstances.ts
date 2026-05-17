@@ -25,11 +25,23 @@
 import { computed, type Ref } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
 import { bffClient } from '@/api/client';
+import { pushEvent } from '@/controls/eventLog';
 
 export function useLayerInstances(layerKey: Ref<string>, service: Ref<string | null>) {
   const q = useQuery({
     queryKey: ['layer-instances', layerKey, service],
-    queryFn: () => bffClient.layer.instances(layerKey.value, service.value ?? ''),
+    queryFn: async () => {
+      pushEvent('instances', 'start', `Loading instances for ${service.value}…`);
+      try {
+        const r = await bffClient.layer.instances(layerKey.value, service.value ?? '');
+        const n = r.instances?.length ?? 0;
+        pushEvent('instances', 'ok', `Loaded ${n} instance${n === 1 ? '' : 's'}`);
+        return r;
+      } catch (err) {
+        pushEvent('instances', 'err', `Instance list failed: ${err instanceof Error ? err.message : String(err)}`);
+        throw err;
+      }
+    },
     enabled: computed(() => layerKey.value.length > 0 && !!service.value),
     staleTime: 30_000,
   });

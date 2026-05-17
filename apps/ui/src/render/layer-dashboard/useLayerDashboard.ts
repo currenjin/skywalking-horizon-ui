@@ -29,6 +29,7 @@
 
 import { computed, type Ref } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
+import { pushEvent } from '@/controls/eventLog';
 import { useAutoRefreshSubscribe } from '../../controls/useAutoRefreshSubscribe';
 import { bffClient } from '@/api/client';
 
@@ -88,17 +89,41 @@ export function useLayerDashboard(
       entityRefs.instance ?? computed(() => null),
       entityRefs.endpoint ?? computed(() => null),
     ],
-    queryFn: () =>
-      bffClient.layer.dashboard(
-        layerKey.value,
-        {
-          ...(service.value ? { service: service.value } : {}),
-          ...(scope?.value ? { scope: scope.value } : {}),
-          ...(entityRefs.instance?.value ? { serviceInstance: entityRefs.instance.value } : {}),
-          ...(entityRefs.endpoint?.value ? { endpoint: entityRefs.endpoint.value } : {}),
-        },
-        mockTop?.value ? { mockTop: mockTop.value } : {},
-      ),
+    queryFn: async () => {
+      const s = scope?.value ?? 'service';
+      const label = entityRefs.instance?.value
+        ? `${service.value} / ${entityRefs.instance.value}`
+        : entityRefs.endpoint?.value
+          ? `${service.value} / ${entityRefs.endpoint.value}`
+          : service.value ?? layerKey.value;
+      pushEvent('dashboard', 'start', `Querying ${s} dashboard for ${label}…`);
+      try {
+        const r = await bffClient.layer.dashboard(
+          layerKey.value,
+          {
+            ...(service.value ? { service: service.value } : {}),
+            ...(scope?.value ? { scope: scope.value } : {}),
+            ...(entityRefs.instance?.value ? { serviceInstance: entityRefs.instance.value } : {}),
+            ...(entityRefs.endpoint?.value ? { endpoint: entityRefs.endpoint.value } : {}),
+          },
+          mockTop?.value ? { mockTop: mockTop.value } : {},
+        );
+        const total = r.widgets?.length ?? 0;
+        const withData = (r.widgets ?? []).filter(
+          (w) =>
+            !w.error &&
+            (w.value != null ||
+              (w.series?.length ?? 0) > 0 ||
+              (w.topList?.length ?? 0) > 0 ||
+              (w.topGroups?.length ?? 0) > 0),
+        ).length;
+        pushEvent('dashboard', 'ok', `Rendered ${withData}/${total} widget${total === 1 ? '' : 's'} with data`);
+        return r;
+      } catch (err) {
+        pushEvent('dashboard', 'err', `Dashboard query failed: ${err instanceof Error ? err.message : String(err)}`);
+        throw err;
+      }
+    },
     // Gate the metric query on the entity actually being resolved.
     // Otherwise the dashboard fires twice on landing: once with
     // `service: null` (BFF then auto-picks the first service by
