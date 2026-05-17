@@ -124,17 +124,44 @@ function buildOption(): echarts.EChartsCoreOption {
       // widget card's overflow:hidden. Otherwise the tooltip cuts off
       // at the card edge whenever a chart sits near the boundary.
       appendToBody: true,
-      // Containerless trigger needs `confine: true` so the popup
-      // sticks to the viewport edges when there are many series — the
-      // `extraCssText` cap below limits the inner height + adds
-      // scroll so labeled metrics with dozens of series (Envoy
-      // membership health per cluster, K8s pod_status per pod) don't
-      // overflow past the screen. Without these two, the bottom rows
-      // of the tooltip vanish off-screen.
-      confine: true,
       extraCssText:
         'max-height: 60vh; overflow-y: auto; max-width: 360px; ' +
         'box-shadow: 0 8px 24px rgba(0,0,0,0.45);',
+      // Viewport-clamped positioning. `confine: true` only confines to
+      // the chart's own bbox, which doesn't help when the chart sits
+      // near the right / bottom screen edge — the tooltip still spills
+      // off-screen. This callback flips the tooltip to the opposite
+      // side of the cursor whenever it would overflow the viewport,
+      // and never returns a coord with negative top/left.
+      position(
+        point: [number, number],
+        _params: unknown,
+        _dom: HTMLElement,
+        _rect: unknown,
+        size: { contentSize: [number, number]; viewSize: [number, number] },
+      ): [number, number] {
+        // `point` is mouse pos in the chart's local coords; we need
+        // page coords to compare against viewport bounds. The chart's
+        // bounding rect on the page gives us the offset.
+        const chartRect = container.value?.getBoundingClientRect();
+        const pageX = (chartRect?.left ?? 0) + point[0];
+        const pageY = (chartRect?.top ?? 0) + point[1];
+        const [tw, th] = size.contentSize;
+        const vw = document.documentElement.clientWidth;
+        const vh = document.documentElement.clientHeight;
+        const margin = 8;
+        const offset = 12;
+        let x = pageX + offset;
+        if (x + tw > vw - margin) x = pageX - tw - offset;
+        if (x < margin) x = margin;
+        let y = pageY + offset;
+        if (y + th > vh - margin) y = pageY - th - offset;
+        if (y < margin) y = margin;
+        // With appendToBody:true, echarts treats returned [x, y] as
+        // page-absolute coords (positions the tooltip element in
+        // document.body), so we return pixel values.
+        return [x, y];
+      },
       valueFormatter: (v: unknown) =>
         typeof v === 'number' && Number.isFinite(v)
           ? `${formatVal(v)}${props.unit ? ` ${props.unit}` : ''}`
