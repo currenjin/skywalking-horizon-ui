@@ -20,7 +20,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router';
 import Icon, { type IconName } from '@/components/icons/Icon.vue';
 import logoSw from '@/assets/icons/logo-sw.svg?raw';
 import { useAuthStore } from '@/state/auth';
-import { useLayers, firstLayerTab } from '@/shell/useLayers';
+import { useLayers } from '@/shell/useLayers';
 import { useLandingOrder } from '@/shell/useLandingOrder';
 import { useOverviewDashboards } from '@/render/overview/useOverviewDashboards';
 
@@ -31,7 +31,7 @@ async function signOut(): Promise<void> {
   await router.push({ name: 'login' });
 }
 
-const { availableLayers, oapReachable, oapError, hasTopology } = useLayers();
+const { availableLayers, oapReachable, oapError } = useLayers();
 const orderedLayers = useLandingOrder(availableLayers);
 const { publicOverviews } = useOverviewDashboards();
 
@@ -41,21 +41,97 @@ function layerIcon(L: SidebarLayer): IconName {
 }
 
 type SidebarLayer = (typeof orderedLayers.value)[number];
-function hasInstances(L: SidebarLayer): boolean {
-  return L.caps.instances ?? Boolean(L.slots.instances);
+
+/**
+ * Per-layer navigation descriptor. Built ONCE per layer set (rebuilt
+ * only when `orderedLayers` changes) and cached in `layerNavByKey`.
+ * Lets the template render each tab via a single `v-for` instead of
+ * the dozen inline `v-if cap` blocks that fired on every route change
+ * and made the sidebar feel sluggish on OAPs with many layers.
+ *
+ * `isSingle` — the layer collapses to a direct link (no accordion).
+ * `primaryTo` — `/layer/<key>/<firstLayerTab>` (used by the row click).
+ * `tabs` — child rows; empty when `isSingle`.
+ */
+interface LayerTab {
+  key: string;
+  icon: IconName;
+  label: string;
+  to: string;
+  /** Optional badge — currently only Service shows the service count. */
+  badge?: number;
 }
-function hasEndpoints(L: SidebarLayer): boolean {
-  return L.caps.endpoints ?? Boolean(L.slots.endpoints);
+interface LayerNav {
+  isSingle: boolean;
+  primaryTo: string;
+  tabs: LayerTab[];
 }
-/** A layer whose only worthwhile screen is the services list — no
- *  tabs to expand into. Rendered as a direct link, not an accordion. */
-function isSingleFeatureLayer(L: SidebarLayer): boolean {
-  if (hasInstances(L) || hasEndpoints(L)) return false;
-  if (hasTopology(L)) return false;
+
+function buildLayerNav(L: SidebarLayer): LayerNav {
   const c = L.caps;
-  if (c.traces || c.logs || c.traceProfiling || c.ebpfProfiling || c.asyncProfiling || c.events) return false;
-  if (c.endpointDependency || c.serviceMap || c.instanceTopology || c.processTopology) return false;
-  return true;
+  const slots = L.slots;
+  const hasInstances = c.instances ?? Boolean(slots.instances);
+  const hasEndpoints = c.endpoints ?? Boolean(slots.endpoints);
+  const hasTopo = Boolean(c.serviceMap || c.instanceTopology || c.processTopology);
+  const hasAny =
+    hasInstances ||
+    hasEndpoints ||
+    hasTopo ||
+    Boolean(
+      c.traces ||
+        c.logs ||
+        c.traceProfiling ||
+        c.ebpfProfiling ||
+        c.asyncProfiling ||
+        c.networkProfiling ||
+        c.pprofProfiling ||
+        c.events ||
+        c.endpointDependency,
+    );
+  const firstTab = (() => {
+    if (c.dashboards) return 'service';
+    if (hasInstances) return 'instance';
+    if (hasEndpoints) return 'endpoint';
+    if (hasTopo) return 'topology';
+    if (c.endpointDependency) return 'dependency';
+    if (c.traces) return 'trace';
+    if (c.logs) return 'logs';
+    if (c.traceProfiling) return 'trace-profiling';
+    if (c.ebpfProfiling) return 'ebpf-profiling';
+    if (c.networkProfiling) return 'network-profiling';
+    if (c.asyncProfiling) return 'async-profiling';
+    if (c.pprofProfiling) return 'pprof';
+    return 'service';
+  })();
+  const primaryTo = `/layer/${L.key}/${firstTab}`;
+  const isSingle = !hasAny;
+  const tabs: LayerTab[] = [];
+  const push = (t: LayerTab) => tabs.push(t);
+  if (c.dashboards) push({ key: 'service', icon: 'svc', label: 'Service', to: `/layer/${L.key}/service`, badge: L.serviceCount });
+  if (hasInstances) push({ key: 'instance', icon: 'prof', label: slots.instances ?? 'Instance', to: `/layer/${L.key}/instance` });
+  if (hasEndpoints) push({ key: 'endpoint', icon: 'ep', label: slots.endpoints ?? 'Endpoint', to: `/layer/${L.key}/endpoint` });
+  if (hasTopo) push({ key: 'topology', icon: 'topo', label: 'Topology', to: `/layer/${L.key}/topology` });
+  if (c.endpointDependency) {
+    const label = slots.endpointDependency ?? `${slots.endpoints ?? 'Endpoint'} dependency`;
+    push({ key: 'dependency', icon: 'ep', label, to: `/layer/${L.key}/dependency` });
+  }
+  if (c.traces) push({ key: 'trace', icon: 'trace', label: 'Traces', to: `/layer/${L.key}/trace` });
+  if (c.logs) push({ key: 'logs', icon: 'log', label: 'Logs', to: `/layer/${L.key}/logs` });
+  if (c.traceProfiling) push({ key: 'trace-profiling', icon: 'flame', label: 'Trace Profiling', to: `/layer/${L.key}/trace-profiling` });
+  if (c.ebpfProfiling) push({ key: 'ebpf-profiling', icon: 'flame', label: 'eBPF Profiling', to: `/layer/${L.key}/ebpf-profiling` });
+  if (c.networkProfiling) push({ key: 'network-profiling', icon: 'prof', label: 'Network Profiling', to: `/layer/${L.key}/network-profiling` });
+  if (c.pprofProfiling) push({ key: 'pprof', icon: 'prof', label: 'pprof (Go)', to: `/layer/${L.key}/pprof` });
+  if (c.asyncProfiling) push({ key: 'async-profiling', icon: 'flame', label: 'Async Profiling', to: `/layer/${L.key}/async-profiling` });
+  return { isSingle, primaryTo, tabs };
+}
+
+const layerNavByKey = computed<Map<string, LayerNav>>(() => {
+  const m = new Map<string, LayerNav>();
+  for (const L of orderedLayers.value) m.set(L.key, buildLayerNav(L));
+  return m;
+});
+function navFor(L: SidebarLayer): LayerNav {
+  return layerNavByKey.value.get(L.key) ?? buildLayerNav(L);
 }
 
 const expandedLayer = ref<string | null>(null);
@@ -63,12 +139,11 @@ function toggleLayer(key: string): void {
   const wasExpanded = expandedLayer.value === key;
   expandedLayer.value = wasExpanded ? null : key;
   if (!wasExpanded) {
-    const L = orderedLayers.value.find((l) => l.key === key);
-    if (!L) return;
-    const target = `/layer/${L.key}/${firstLayerTab(L)}`;
-    if (route.path === target) return;
-    if (route.path.startsWith(`/layer/${L.key}/`)) return;
-    void router.push(target);
+    const nav = layerNavByKey.value.get(key);
+    if (!nav) return;
+    if (route.path === nav.primaryTo) return;
+    if (route.path.startsWith(`/layer/${key}/`)) return;
+    void router.push(nav.primaryTo);
   }
 }
 
@@ -277,139 +352,52 @@ watch(
             <span class="layer-group-name">{{ E.label }}</span>
           </div>
           <template v-for="L in E.layers" :key="`${E.label}::${L.key}`">
+            <RouterLink
+              v-if="navFor(L).isSingle"
+              :to="navFor(L).primaryTo"
+              class="layer-row direct in-group"
+              :class="{ 'is-active': isActive(`/layer/${L.key}`) }"
+            >
+              <Icon :name="layerIcon(L)" />
+              <span class="layer-name">{{ L.name }}</span>
+            </RouterLink>
+            <div
+              v-else
+              class="layer-row in-group"
+              :class="{
+                'is-expanded': expandedLayer === L.key,
+                'is-active': isActiveExact(`/layer/${L.key}`),
+              }"
+              @click="toggleLayer(L.key)"
+            >
+              <Icon :name="layerIcon(L)" />
+              <span class="layer-name">{{ L.name }}</span>
+              <span class="caret" :class="{ open: expandedLayer === L.key }">
+                <Icon name="caret" :size="10" />
+              </span>
+            </div>
+            <div
+              v-if="!navFor(L).isSingle && expandedLayer === L.key"
+              class="layer-children in-group"
+            >
               <RouterLink
-                v-if="isSingleFeatureLayer(L)"
-                :to="`/layer/${L.key}/${firstLayerTab(L)}`"
-                class="layer-row direct in-group"
-                :class="{ 'is-active': isActive(`/layer/${L.key}`) }"
+                v-for="tab in navFor(L).tabs"
+                :key="tab.key"
+                :to="tab.to"
+                class="sw-nav-item"
+                :class="{ 'is-active': isActive(tab.to) }"
               >
-                <Icon :name="layerIcon(L)" />
-                <span class="layer-name">{{ L.name }}</span>
+                <Icon :name="tab.icon" /><span>{{ tab.label }}</span>
+                <span v-if="tab.badge != null" class="sw-badge" style="margin-left: auto">{{ tab.badge }}</span>
               </RouterLink>
-              <div
-                v-else
-                class="layer-row in-group"
-                :class="{
-                  'is-expanded': expandedLayer === L.key,
-                  'is-active': isActiveExact(`/layer/${L.key}`),
-                }"
-                @click="toggleLayer(L.key)"
-              >
-                <Icon :name="layerIcon(L)" />
-                <span class="layer-name">{{ L.name }}</span>
-                <span class="caret" :class="{ open: expandedLayer === L.key }">
-                  <Icon name="caret" :size="10" />
-                </span>
-              </div>
-              <div
-                v-if="!isSingleFeatureLayer(L) && expandedLayer === L.key"
-                class="layer-children in-group"
-              >
-                <RouterLink
-                  v-if="L.caps.dashboards"
-                  :to="`/layer/${L.key}/${firstLayerTab(L)}`"
-                  class="sw-nav-item"
-                  :class="{ 'is-active': isActive(`/layer/${L.key}/${firstLayerTab(L)}`) || route.path === `/layer/${L.key}` }"
-                >
-                  <Icon name="svc" /><span>Service</span>
-                  <span class="sw-badge" style="margin-left: auto">{{ L.serviceCount }}</span>
-                </RouterLink>
-                <RouterLink
-                  v-if="hasInstances(L)"
-                  :to="`/layer/${L.key}/instance`"
-                  class="sw-nav-item"
-                  :class="{ 'is-active': isActive(`/layer/${L.key}/instance`) }"
-                >
-                  <Icon name="prof" /><span>{{ L.slots.instances ?? 'Instance' }}</span>
-                </RouterLink>
-                <RouterLink
-                  v-if="hasEndpoints(L)"
-                  :to="`/layer/${L.key}/endpoint`"
-                  class="sw-nav-item"
-                  :class="{ 'is-active': isActive(`/layer/${L.key}/endpoint`) }"
-                >
-                  <Icon name="ep" /><span>{{ L.slots.endpoints ?? 'Endpoint' }}</span>
-                </RouterLink>
-                <RouterLink
-                  v-if="hasTopology(L)"
-                  :to="`/layer/${L.key}/topology`"
-                  class="sw-nav-item"
-                  :class="{ 'is-active': isActive(`/layer/${L.key}/topology`) }"
-                >
-                  <Icon name="topo" /><span>Topology</span>
-                </RouterLink>
-                <RouterLink
-                  v-if="L.caps.endpointDependency"
-                  :to="`/layer/${L.key}/dependency`"
-                  class="sw-nav-item"
-                  :class="{ 'is-active': isActive(`/layer/${L.key}/dependency`) }"
-                >
-                  <Icon name="ep" /><span>{{ L.slots.endpointDependency || 'Dependency' }}</span>
-                </RouterLink>
-                <RouterLink
-                  v-if="L.caps.traces"
-                  :to="`/layer/${L.key}/trace`"
-                  class="sw-nav-item"
-                  :class="{ 'is-active': isActive(`/layer/${L.key}/trace`) }"
-                >
-                  <Icon name="trace" /><span>Trace</span>
-                </RouterLink>
-                <RouterLink
-                  v-if="L.caps.logs"
-                  :to="`/layer/${L.key}/logs`"
-                  class="sw-nav-item"
-                  :class="{ 'is-active': isActive(`/layer/${L.key}/logs`) }"
-                >
-                  <Icon name="log" /><span>Logs</span>
-                </RouterLink>
-                <RouterLink
-                  v-if="L.caps.traceProfiling"
-                  :to="`/layer/${L.key}/trace-profiling`"
-                  class="sw-nav-item"
-                  :class="{ 'is-active': isActive(`/layer/${L.key}/trace-profiling`) }"
-                >
-                  <Icon name="prof" /><span>Trace Profiling</span>
-                </RouterLink>
-                <RouterLink
-                  v-if="L.caps.ebpfProfiling"
-                  :to="`/layer/${L.key}/ebpf-profiling`"
-                  class="sw-nav-item"
-                  :class="{ 'is-active': isActive(`/layer/${L.key}/ebpf-profiling`) }"
-                >
-                  <Icon name="prof" /><span>eBPF Profiling</span>
-                </RouterLink>
-                <RouterLink
-                  v-if="L.caps.asyncProfiling"
-                  :to="`/layer/${L.key}/async-profiling`"
-                  class="sw-nav-item"
-                  :class="{ 'is-active': isActive(`/layer/${L.key}/async-profiling`) }"
-                >
-                  <Icon name="prof" /><span>Async Profiling</span>
-                </RouterLink>
-                <RouterLink
-                  v-if="L.caps.networkProfiling"
-                  :to="`/layer/${L.key}/network-profiling`"
-                  class="sw-nav-item"
-                  :class="{ 'is-active': isActive(`/layer/${L.key}/network-profiling`) }"
-                >
-                  <Icon name="prof" /><span>Network Profiling</span>
-                </RouterLink>
-                <RouterLink
-                  v-if="L.caps.pprofProfiling"
-                  :to="`/layer/${L.key}/pprof`"
-                  class="sw-nav-item"
-                  :class="{ 'is-active': isActive(`/layer/${L.key}/pprof`) }"
-                >
-                  <Icon name="prof" /><span>pprof (Go)</span>
-                </RouterLink>
-              </div>
-            </template>
+            </div>
+          </template>
         </template>
 
         <!-- Ungrouped single-feature layer: direct link. -->
         <RouterLink
-          v-else-if="isSingleFeatureLayer(E.layer)"
-          :to="`/layer/${E.layer.key}/${firstLayerTab(E.layer)}`"
+          v-else-if="navFor(E.layer).isSingle"
+          :to="navFor(E.layer).primaryTo"
           class="layer-row direct"
           :class="{ 'is-active': isActive(`/layer/${E.layer.key}`) }"
         >
@@ -433,105 +421,18 @@ watch(
           </span>
         </div>
         <div
-          v-if="E.kind === 'single' && !isSingleFeatureLayer(E.layer) && expandedLayer === E.layer.key"
+          v-if="E.kind === 'single' && !navFor(E.layer).isSingle && expandedLayer === E.layer.key"
           class="layer-children"
         >
           <RouterLink
-            v-if="E.layer.caps.dashboards"
-            :to="`/layer/${E.layer.key}/${firstLayerTab(E.layer)}`"
+            v-for="tab in navFor(E.layer).tabs"
+            :key="tab.key"
+            :to="tab.to"
             class="sw-nav-item"
-            :class="{ 'is-active': isActive(`/layer/${E.layer.key}/${firstLayerTab(E.layer)}`) || route.path === `/layer/${E.layer.key}` }"
+            :class="{ 'is-active': isActive(tab.to) }"
           >
-            <Icon name="svc" /><span>Service</span>
-            <span class="sw-badge" style="margin-left: auto">{{ E.layer.serviceCount }}</span>
-          </RouterLink>
-          <RouterLink
-            v-if="hasInstances(E.layer)"
-            :to="`/layer/${E.layer.key}/instance`"
-            class="sw-nav-item"
-            :class="{ 'is-active': isActive(`/layer/${E.layer.key}/instance`) }"
-          >
-            <Icon name="prof" /><span>{{ E.layer.slots.instances ?? 'Instance' }}</span>
-          </RouterLink>
-          <RouterLink
-            v-if="hasEndpoints(E.layer)"
-            :to="`/layer/${E.layer.key}/endpoint`"
-            class="sw-nav-item"
-            :class="{ 'is-active': isActive(`/layer/${E.layer.key}/endpoint`) }"
-          >
-            <Icon name="ep" /><span>{{ E.layer.slots.endpoints ?? 'Endpoint' }}</span>
-          </RouterLink>
-          <RouterLink
-            v-if="hasTopology(E.layer)"
-            :to="`/layer/${E.layer.key}/topology`"
-            class="sw-nav-item"
-            :class="{ 'is-active': isActive(`/layer/${E.layer.key}/topology`) }"
-          >
-            <Icon name="topo" /><span>Topology</span>
-          </RouterLink>
-          <RouterLink
-            v-if="E.layer.caps.endpointDependency"
-            :to="`/layer/${E.layer.key}/dependency`"
-            class="sw-nav-item"
-            :class="{ 'is-active': isActive(`/layer/${E.layer.key}/dependency`) }"
-          >
-            <Icon name="ep" /><span>{{ E.layer.slots.endpointDependency ?? `${E.layer.slots.endpoints ?? 'Endpoint'} dependency` }}</span>
-          </RouterLink>
-          <RouterLink
-            v-if="E.layer.caps.traces"
-            :to="`/layer/${E.layer.key}/trace`"
-            class="sw-nav-item"
-            :class="{ 'is-active': isActive(`/layer/${E.layer.key}/trace`) }"
-          >
-            <Icon name="trace" /><span>Traces</span>
-          </RouterLink>
-          <RouterLink
-            v-if="E.layer.caps.logs"
-            :to="`/layer/${E.layer.key}/logs`"
-            class="sw-nav-item"
-            :class="{ 'is-active': isActive(`/layer/${E.layer.key}/logs`) }"
-          >
-            <Icon name="log" /><span>Logs</span>
-          </RouterLink>
-          <RouterLink
-            v-if="E.layer.caps.traceProfiling"
-            :to="`/layer/${E.layer.key}/trace-profiling`"
-            class="sw-nav-item"
-            :class="{ 'is-active': isActive(`/layer/${E.layer.key}/trace-profiling`) }"
-          >
-            <Icon name="flame" /><span>Trace Profiling</span>
-          </RouterLink>
-          <RouterLink
-            v-if="E.layer.caps.ebpfProfiling"
-            :to="`/layer/${E.layer.key}/ebpf-profiling`"
-            class="sw-nav-item"
-            :class="{ 'is-active': isActive(`/layer/${E.layer.key}/ebpf-profiling`) }"
-          >
-            <Icon name="flame" /><span>eBPF Profiling</span>
-          </RouterLink>
-          <RouterLink
-            v-if="E.layer.caps.networkProfiling"
-            :to="`/layer/${E.layer.key}/network-profiling`"
-            class="sw-nav-item"
-            :class="{ 'is-active': isActive(`/layer/${E.layer.key}/network-profiling`) }"
-          >
-            <Icon name="prof" /><span>Network Profiling</span>
-          </RouterLink>
-          <RouterLink
-            v-if="E.layer.caps.pprofProfiling"
-            :to="`/layer/${E.layer.key}/pprof`"
-            class="sw-nav-item"
-            :class="{ 'is-active': isActive(`/layer/${E.layer.key}/pprof`) }"
-          >
-            <Icon name="prof" /><span>pprof (Go)</span>
-          </RouterLink>
-          <RouterLink
-            v-if="E.layer.caps.asyncProfiling"
-            :to="`/layer/${E.layer.key}/async-profiling`"
-            class="sw-nav-item"
-            :class="{ 'is-active': isActive(`/layer/${E.layer.key}/async-profiling`) }"
-          >
-            <Icon name="flame" /><span>Async Profiling</span>
+            <Icon :name="tab.icon" /><span>{{ tab.label }}</span>
+            <span v-if="tab.badge != null" class="sw-badge" style="margin-left: auto">{{ tab.badge }}</span>
           </RouterLink>
         </div>
       </template>
@@ -543,8 +444,8 @@ watch(
         </div>
         <template v-for="L in operateLayers" :key="`op:${L.key}`">
           <RouterLink
-            v-if="isSingleFeatureLayer(L)"
-            :to="`/layer/${L.key}/${firstLayerTab(L)}`"
+            v-if="navFor(L).isSingle"
+            :to="navFor(L).primaryTo"
             class="layer-row direct"
             :class="{ 'is-active': isActive(`/layer/${L.key}`) }"
           >
@@ -568,33 +469,18 @@ watch(
             </span>
           </div>
           <div
-            v-if="!isSingleFeatureLayer(L) && expandedLayer === L.key"
+            v-if="!navFor(L).isSingle && expandedLayer === L.key"
             class="layer-children"
           >
             <RouterLink
-              v-if="L.caps.dashboards"
-              :to="`/layer/${L.key}/${firstLayerTab(L)}`"
+              v-for="tab in navFor(L).tabs"
+              :key="tab.key"
+              :to="tab.to"
               class="sw-nav-item"
-              :class="{ 'is-active': isActive(`/layer/${L.key}/${firstLayerTab(L)}`) || route.path === `/layer/${L.key}` }"
+              :class="{ 'is-active': isActive(tab.to) }"
             >
-              <Icon name="svc" /><span>Service</span>
-              <span class="sw-badge" style="margin-left: auto">{{ L.serviceCount }}</span>
-            </RouterLink>
-            <RouterLink
-              v-if="hasInstances(L)"
-              :to="`/layer/${L.key}/instance`"
-              class="sw-nav-item"
-              :class="{ 'is-active': isActive(`/layer/${L.key}/instance`) }"
-            >
-              <Icon name="prof" /><span>{{ L.slots.instances ?? 'Instance' }}</span>
-            </RouterLink>
-            <RouterLink
-              v-if="hasEndpoints(L)"
-              :to="`/layer/${L.key}/endpoint`"
-              class="sw-nav-item"
-              :class="{ 'is-active': isActive(`/layer/${L.key}/endpoint`) }"
-            >
-              <Icon name="ep" /><span>{{ L.slots.endpoints ?? 'Endpoint' }}</span>
+              <Icon :name="tab.icon" /><span>{{ tab.label }}</span>
+              <span v-if="tab.badge != null" class="sw-badge" style="margin-left: auto">{{ tab.badge }}</span>
             </RouterLink>
           </div>
         </template>
