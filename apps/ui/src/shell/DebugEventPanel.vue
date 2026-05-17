@@ -91,7 +91,11 @@ const eventCount = computed<number>(() => all.value.length);
 <style scoped>
 .dbg {
   position: fixed;
-  left: 0;
+  /* Start past the 220px sidebar so the sidebar's bottom (Admin
+   * section + sw-side-foot with user/logout) isn't covered. The
+   * sidebar already has its own scroll if its contents exceed
+   * the viewport height. */
+  left: 220px;
   right: 0;
   bottom: 0;
   z-index: 60;
