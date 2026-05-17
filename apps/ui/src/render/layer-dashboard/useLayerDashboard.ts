@@ -120,25 +120,28 @@ export function useLayerDashboard(
         },
         mockTop?.value ? { mockTop: mockTop.value } : {},
       ),
-    // Gate the metric query on the entity actually being resolved.
-    // Otherwise the dashboard fires twice on landing: once with
-    // `service: null` (BFF then auto-picks the first service by
-    // orderBy, which often differs from the URL-selected one), then
-    // again once the landing rows arrive and `serviceName` resolves.
-    // The first fire returns rows for the wrong service and they
-    // briefly flash on screen — for instance/endpoint scopes the
-    // first fire returns mostly empty widgets because the BFF has no
-    // entity to scope to. Wait until both layer + service are known.
+    // Trailing-control principle: the widget batch is the deepest
+    // control in the chain and must wait for everything upstream
+    // (layer → service → instance/endpoint) to be resolved by the
+    // UI before firing. The BFF can auto-pick a default instance
+    // when the SPA omits one, but doing so silently means the
+    // dashboard fires TWICE on landing (BFF default → then again
+    // when the UI's picker auto-resolves the URL ?instance= it
+    // wants), which manifested as widgets snapping to "BFF default"
+    // data before re-rendering with the operator's actual pick.
     //
-    // Layer-wide scopes (`topology`, `dependency`, `logs`,
-    // `trace*Profiling`, `trace`) don't need a service — keep them
-    // enabled the moment `layerKey` is known.
+    // Gating rules:
+    //   - layer-wide scopes (topology / dependency / logs /
+    //     trace / *-profiling) only need `layerKey`.
+    //   - service scope                          needs service.
+    //   - instance scope needs service + instance.
+    //   - endpoint scope needs service + endpoint.
     enabled: computed(() => {
       if (layerKey.value.length === 0) return false;
       const s = scope?.value ?? 'service';
-      if (s === 'service' || s === 'instance' || s === 'endpoint') {
-        return Boolean(service.value);
-      }
+      if (s === 'service') return Boolean(service.value);
+      if (s === 'instance') return Boolean(service.value && entityRefs.instance?.value);
+      if (s === 'endpoint') return Boolean(service.value && entityRefs.endpoint?.value);
       return true;
     }),
     staleTime: 25_000,
