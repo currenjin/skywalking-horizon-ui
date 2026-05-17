@@ -64,6 +64,16 @@ watch(
   ([key, scope]) => {
     if (!key) return;
     selectionStore.hydrateFromQuery(key, scope, route.query);
+    // Strip the seeded selection params from the address bar so the
+    // displayed URL stays a clean dashboard link. The store now owns
+    // the live state; the params were only ever a one-shot seed for
+    // shared/pasted links. Other query keys (none today, but room for
+    // future per-route flags) are preserved.
+    const q = route.query;
+    if (q.service != null || q.instance != null || q.endpoint != null) {
+      const { service: _s, instance: _i, endpoint: _e, ...rest } = q;
+      void router.replace({ path: route.path, query: rest });
+    }
   },
   { immediate: true },
 );
@@ -218,6 +228,36 @@ function pickService(id: string): void {
   setTimeout(() => {
     pickerOpen.value = false;
   }, 140);
+}
+
+// Share button — copies a URL that re-creates the current header
+// selection (service/instance/endpoint) when pasted. The store owns
+// the live state and the URL stays frozen on landing, so we have to
+// assemble the link on demand from `selectionStore.shareQuery`. The
+// `copied` chip is the only feedback channel; we have no toast system
+// and don't want one for a single action.
+const shareCopied = ref(false);
+let shareCopiedTimer: ReturnType<typeof setTimeout> | null = null;
+async function copyShareLink(): Promise<void> {
+  const url = window.location.origin + window.location.pathname + selectionStore.shareQuery;
+  try {
+    await navigator.clipboard.writeText(url);
+  } catch {
+    // Fallback for non-secure contexts (clipboard API requires HTTPS
+    // or localhost). A hidden textarea + execCommand is the only
+    // path that works in plain HTTP intranets — common deployment
+    // shape for self-hosted OAP installs.
+    const ta = document.createElement('textarea');
+    ta.value = url;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } finally { document.body.removeChild(ta); }
+  }
+  shareCopied.value = true;
+  if (shareCopiedTimer) clearTimeout(shareCopiedTimer);
+  shareCopiedTimer = setTimeout(() => { shareCopied.value = false; }, 1400);
 }
 
 // ── Header identity ──────────────────────────────────────────────────
@@ -391,6 +431,21 @@ const serviceKpis = computed<HeaderKpi[]>(() => {
         >
           <Icon name="refresh" :class="{ spin: landing.isFetching.value }" />
         </button>
+        <!-- Share — assemble the current selection into a URL the
+             operator can paste anywhere. The URL only carries the
+             header selection (service/instance/endpoint); the store
+             owns the live state, so this is purely an export. The
+             little 'copied' flash gives the click a visible echo
+             without needing a toast system. -->
+        <button
+          class="sw-btn ghost svc-share"
+          type="button"
+          :title="shareCopied ? 'Link copied' : 'Copy a shareable link to the current view'"
+          @click="copyShareLink"
+        >
+          <Icon name="share" />
+          <span v-if="shareCopied" class="svc-share-flash">copied</span>
+        </button>
         <div v-if="serviceKpis.length > 0" class="kpi-strip service-kpis">
           <div v-for="(k, i) in serviceKpis" :key="i" class="kpi compact">
             <span class="kpi-label inline">
@@ -467,6 +522,32 @@ const serviceKpis = computed<HeaderKpi[]>(() => {
 }
 @keyframes svc-refresh-spin {
   to { transform: rotate(360deg); }
+}
+.svc-share {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.svc-share-flash {
+  position: absolute;
+  top: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 6px;
+  background: var(--sw-bg-2);
+  border: 1px solid var(--sw-line-2);
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--sw-fg-1);
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 .layer-shell {
