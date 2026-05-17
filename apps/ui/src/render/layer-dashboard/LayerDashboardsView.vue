@@ -35,7 +35,7 @@ import { colorForMetric } from '@/utils/metricColor';
 import { useLayerDashboard, useLayerDashboardConfig } from '@/render/layer-dashboard/useLayerDashboard';
 import { useLayerPageOrchestrator } from '@/render/layer-dashboard/useLayerPageOrchestrator';
 import { useLayerEndpoints } from '@/layer/useLayerEndpoints';
-import { useLayerInstances } from '@/layer/useLayerInstances';
+import { useLayerInstances, usePrefetchLayerInstances } from '@/layer/useLayerInstances';
 import { useLayerLanding } from '@/layer/useLayerLanding';
 import { useTimeRangeStore } from '@/controls/timeRange';
 import { useLayers } from '@/shell/useLayers';
@@ -148,6 +148,17 @@ const expandedInstance = ref<string | null>(null);
  *  bound to it. */
 const { setSelected: setSelectedService } = useSelectedService();
 const landingRows = computed(() => landing.data.value?.sampledRows ?? landing.rows.value ?? []);
+// Background pre-fetch — kick off instance-list requests for every
+// service in the landing as soon as rows arrive, so the operator's
+// next service-switch click finds the new service's instance list
+// already cached. Uses vue-query's prefetchQuery under the same
+// cache key as the active `useLayerInstances`, so no duplicate
+// requests fire. Eliminates the ~100-500ms BFF round-trip that
+// otherwise gates the dashboard refire on service change.
+usePrefetchLayerInstances(
+  layerKey,
+  computed(() => landingRows.value.map((r) => r.serviceId)),
+);
 watch(landingRows, (rows) => {
   const first = rows[0];
   if (!first) return;
