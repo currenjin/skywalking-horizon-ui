@@ -69,7 +69,16 @@ export interface OrchestratorRefs {
   endpointList: Ref<ReadonlyArray<{ id: string; name: string }>>;
   effectiveEndpoint: Ref<string | null>;
   /** Dashboard response — widgets rendered. */
-  dashboard: Ref<{ widgets?: Array<{ error?: string; value?: unknown; series?: unknown[]; topList?: unknown[]; topGroups?: unknown[] }> } | null>;
+  dashboard: Ref<{
+    widgets?: Array<{
+      id: string;
+      error?: string;
+      value?: unknown;
+      series?: unknown[];
+      topList?: unknown[];
+      topGroups?: unknown[];
+    }>;
+  } | null>;
 }
 
 type Phase =
@@ -242,6 +251,41 @@ export function useLayerPageOrchestrator(refs: OrchestratorRefs): {
       report('dashboard', `Step 6 · widgets rendered · ${withData}/${total} with data`);
       stamps.dashboard = true;
       done.value = true;
+
+      // After the batch dashboard returns, emit a per-widget event
+      // for every result so the EventTicker shows which widget got
+      // data, which came back empty, and which errored. The dashboard
+      // query is batched server-side (one GraphQL trip for all MQEs)
+      // so these are post-hoc info events, not separate fetches —
+      // they let the operator pinpoint a specific widget's status
+      // without staring at the rendered grid.
+      const cfgWidgets = (refs.config.value?.widgets ?? []) as Array<{ id?: string; title?: string }>;
+      const titleById = new Map<string, string>();
+      for (const cw of cfgWidgets) {
+        if (cw?.id) titleById.set(cw.id, cw.title ?? cw.id);
+      }
+      for (const r of widgets) {
+        const label = titleById.get(r.id) ?? r.id;
+        let kind: 'ok' | 'err' | 'info' = 'info';
+        let detail = 'no data';
+        if (r.error) {
+          kind = 'err';
+          detail = `error: ${r.error}`;
+        } else if (r.value != null) {
+          kind = 'ok';
+          detail = `value ${r.value}`;
+        } else if (Array.isArray(r.series) && r.series.length > 0) {
+          kind = 'ok';
+          detail = `${r.series.length} series`;
+        } else if (Array.isArray(r.topList) && r.topList.length > 0) {
+          kind = 'ok';
+          detail = `top ${r.topList.length}`;
+        } else if (Array.isArray(r.topGroups) && r.topGroups.length > 0) {
+          kind = 'ok';
+          detail = `${r.topGroups.length} group${r.topGroups.length === 1 ? '' : 's'}`;
+        }
+        pushEvent(`widget/${r.id}`, kind, `Widget ${label} · ${detail}`);
+      }
     },
     { immediate: true },
   );
