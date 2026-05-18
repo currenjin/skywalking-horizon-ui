@@ -20,6 +20,7 @@ import { resolve } from 'node:path';
 import chokidar from 'chokidar';
 import YAML from 'yaml';
 import { configSchema, type HorizonConfig } from './schema.js';
+import { logger } from '../logger.js';
 
 export interface ConfigSource {
   readonly current: HorizonConfig;
@@ -50,7 +51,9 @@ export function interpolateEnv(
 }
 
 /** Raised when the loaded config is structurally valid but operationally
- *  unusable (e.g. no auth backend wired). */
+ *  unusable in a way that cannot be deferred to runtime (reserved — no
+ *  current callers; the auth-unconfigured cases boot and surface the
+ *  problem on the login page instead). */
 export class BootstrapError extends Error {
   constructor(message: string) {
     super(message);
@@ -59,32 +62,62 @@ export class BootstrapError extends Error {
 }
 
 /**
- * Refuse to start when neither auth backend has a usable configuration.
- * The principle is fail-loud: a misconfigured deployment should crash on
- * boot with a clear pointer, not silently accept no logins.
+ * Returns `true` when the loaded config has a usable auth backend wired
+ * (at least one local user, or an LDAP block with a non-empty group
+ * mappings table). Returns `false` when the operator hasn't finished
+ * setting up auth — the BFF still boots, login attempts are rejected
+ * with helpful messages, and the login page shows a setup-required
+ * banner driven by `/api/auth/health`. The frame for this is that an
+ * out-of-the-box `docker run` should reach a visible UI rather than
+ * crash with a log line a beginner won't see.
+ */
+export function isAuthConfigured(cfg: HorizonConfig): boolean {
+  if (cfg.auth.backend === 'local') {
+    return cfg.auth.local.users.length > 0;
+  }
+  if (cfg.auth.backend === 'ldap') {
+    return !!cfg.auth.ldap && cfg.auth.ldap.groupMappings.length > 0;
+  }
+  return false;
+}
+
+/**
+ * Inspect the loaded config and emit a startup warning if auth isn't
+ * wired yet. Kept as a separate function (rather than inlined into
+ * `loadConfig`) so callers can choose to skip it (tests) or run it on
+ * config hot-reload too.
+ *
+ * The historical contract was fail-loud — a misconfigured deployment
+ * crashed on boot. That was inconvenient for first-touch operators:
+ * a clean `docker run` produced a CrashLoopBackOff instead of a UI
+ * with a "set up auth" hint. We now boot, log a warning, and surface
+ * the same information to the login page so the first interaction is
+ * "open browser → see the next step" rather than "watch container
+ * logs → guess what's wrong".
  *
  * Returns the input on success so callers can chain.
  */
 export function validateBootstrap(cfg: HorizonConfig): HorizonConfig {
-  if (cfg.auth.backend === 'local') {
-    if (cfg.auth.local.users.length === 0) {
-      throw new BootstrapError(
-        'auth.backend is "local" but auth.local.users is empty. ' +
-          'Add at least one user (use `pnpm --filter bff cli:hash` for the password hash) ' +
-          'or switch to LDAP.',
-      );
-    }
+  if (cfg.auth.backend === 'local' && cfg.auth.local.users.length === 0) {
+    logger.warn(
+      'auth.backend is "local" but auth.local.users is empty. ' +
+        'BFF is booting but no login will succeed until you add at least one user ' +
+        '(use `pnpm --filter bff cli:hash` for the password hash) or switch to LDAP. ' +
+        'The login page will surface this state to the operator.',
+    );
   } else if (cfg.auth.backend === 'ldap') {
     if (!cfg.auth.ldap) {
-      throw new BootstrapError(
+      logger.warn(
         'auth.backend is "ldap" but auth.ldap is missing. ' +
-          'Configure the directory connection or switch to local users.',
+          'BFF is booting but every login attempt will fail until you configure ' +
+          'the directory connection or switch to local users.',
       );
-    }
-    if (cfg.auth.ldap.groupMappings.length === 0) {
-      throw new BootstrapError(
-        'auth.ldap.groupMappings is empty — no LDAP user would be assigned any role. ' +
-          'Add at least one mapping (use `group: "*"` to assign a fallback role to everyone).',
+    } else if (cfg.auth.ldap.groupMappings.length === 0) {
+      logger.warn(
+        'auth.ldap.groupMappings is empty — no LDAP user would be assigned any role, ' +
+          'so every login will fail. Add at least one mapping (use `group: "*"` to ' +
+          'assign a fallback role to everyone). BFF is booting; the login page will ' +
+          'surface this state.',
       );
     }
   }

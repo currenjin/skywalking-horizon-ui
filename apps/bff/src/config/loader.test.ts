@@ -17,7 +17,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { configSchema } from './schema.js';
-import { BootstrapError, interpolateEnv, validateBootstrap } from './loader.js';
+import { interpolateEnv, isAuthConfigured, validateBootstrap } from './loader.js';
 
 describe('interpolateEnv', () => {
   it('substitutes a defined variable', () => {
@@ -53,19 +53,13 @@ describe('interpolateEnv', () => {
   });
 });
 
-describe('validateBootstrap', () => {
-  function cfgWith(overrides: Record<string, unknown>) {
-    return configSchema.parse({
-      auth: { backend: 'local', local: { users: [] }, ...overrides },
-    });
-  }
-
-  it('refuses to start with backend:local and zero users', () => {
-    const cfg = cfgWith({});
-    expect(() => validateBootstrap(cfg)).toThrow(BootstrapError);
+describe('isAuthConfigured', () => {
+  it('false for backend:local with zero users', () => {
+    const cfg = configSchema.parse({ auth: { backend: 'local', local: { users: [] } } });
+    expect(isAuthConfigured(cfg)).toBe(false);
   });
 
-  it('accepts backend:local with at least one user', () => {
+  it('true for backend:local with at least one user', () => {
     const cfg = configSchema.parse({
       auth: {
         backend: 'local',
@@ -74,15 +68,15 @@ describe('validateBootstrap', () => {
         },
       },
     });
-    expect(() => validateBootstrap(cfg)).not.toThrow();
+    expect(isAuthConfigured(cfg)).toBe(true);
   });
 
-  it('refuses to start with backend:ldap and no auth.ldap', () => {
+  it('false for backend:ldap with no auth.ldap', () => {
     const cfg = configSchema.parse({ auth: { backend: 'ldap', local: { users: [] } } });
-    expect(() => validateBootstrap(cfg)).toThrow(BootstrapError);
+    expect(isAuthConfigured(cfg)).toBe(false);
   });
 
-  it('refuses backend:ldap when ldap.groupMappings is empty', () => {
+  it('false for backend:ldap when ldap.groupMappings is empty', () => {
     const cfg = configSchema.parse({
       auth: {
         backend: 'ldap',
@@ -94,10 +88,10 @@ describe('validateBootstrap', () => {
         },
       },
     });
-    expect(() => validateBootstrap(cfg)).toThrow(BootstrapError);
+    expect(isAuthConfigured(cfg)).toBe(false);
   });
 
-  it('accepts backend:ldap when ldap has at least one group mapping', () => {
+  it('true for backend:ldap when ldap has at least one group mapping', () => {
     const cfg = configSchema.parse({
       auth: {
         backend: 'ldap',
@@ -106,6 +100,48 @@ describe('validateBootstrap', () => {
           url: 'ldap://localhost',
           userBaseDn: 'ou=people,dc=corp',
           groupMappings: [{ group: '*', role: 'viewer' }],
+        },
+      },
+    });
+    expect(isAuthConfigured(cfg)).toBe(true);
+  });
+});
+
+describe('validateBootstrap', () => {
+  // Auth-unconfigured cases no longer throw — the BFF boots and surfaces
+  // the state via /api/auth/health so the login page can render a
+  // setup-required banner. The validator only logs.
+  it('does not throw with backend:local and zero users', () => {
+    const cfg = configSchema.parse({ auth: { backend: 'local', local: { users: [] } } });
+    expect(() => validateBootstrap(cfg)).not.toThrow();
+  });
+
+  it('does not throw with backend:ldap and no auth.ldap', () => {
+    const cfg = configSchema.parse({ auth: { backend: 'ldap', local: { users: [] } } });
+    expect(() => validateBootstrap(cfg)).not.toThrow();
+  });
+
+  it('does not throw with backend:ldap and empty groupMappings', () => {
+    const cfg = configSchema.parse({
+      auth: {
+        backend: 'ldap',
+        local: { users: [] },
+        ldap: {
+          url: 'ldap://localhost',
+          userBaseDn: 'ou=people,dc=corp',
+          groupMappings: [],
+        },
+      },
+    });
+    expect(() => validateBootstrap(cfg)).not.toThrow();
+  });
+
+  it('does not throw for a fully configured local backend', () => {
+    const cfg = configSchema.parse({
+      auth: {
+        backend: 'local',
+        local: {
+          users: [{ username: 'a', passwordHash: '$argon2id$x', roles: ['admin'] }],
         },
       },
     });

@@ -49,14 +49,16 @@ onUnmounted(() => {
   if (pingTimer) clearInterval(pingTimer);
 });
 
-const statusKind = computed<'ok' | 'err' | 'info' | null>(() => {
+const statusKind = computed<'ok' | 'err' | 'info' | 'warn' | null>(() => {
   if (!health.value) return null;
+  if (!health.value.configured) return 'warn';
   if (health.value.backend === 'local') return 'ok';
   if (health.value.backend === 'ldap') return health.value.ldap?.reachable ? 'ok' : 'err';
   return 'info';
 });
 const statusLabel = computed<string>(() => {
   if (!health.value) return 'Checking auth backend…';
+  if (!health.value.configured) return 'Auth not configured';
   if (health.value.backend === 'local') return 'Local users';
   if (health.value.backend === 'ldap') {
     return health.value.ldap?.reachable ? 'LDAP reachable' : 'LDAP unreachable';
@@ -64,6 +66,8 @@ const statusLabel = computed<string>(() => {
   return 'Unknown backend';
 });
 const statusHost = computed<string | null>(() => health.value?.ldap?.host ?? null);
+const unconfigured = computed<boolean>(() => health.value !== null && !health.value.configured);
+const setupHint = computed<string>(() => health.value?.setupHint ?? '');
 const currentYear = new Date().getFullYear();
 
 async function submit(): Promise<void> {
@@ -116,6 +120,26 @@ async function submit(): Promise<void> {
           <h1>Welcome to SkyWalking</h1>
         </div>
 
+        <!-- First-touch banner: auth isn't wired yet. The BFF still
+             boots in this state; this banner is what the operator sees
+             instead of a crashed container. -->
+        <div v-if="unconfigured" class="setup-banner" role="alert">
+          <div class="setup-banner-head">
+            <span class="setup-banner-icon" aria-hidden="true">⚙︎</span>
+            <b>Auth not configured</b>
+          </div>
+          <p class="setup-banner-body">{{ setupHint }}</p>
+          <p class="setup-banner-foot">
+            See
+            <a
+              href="https://skywalking.apache.org/docs/skywalking-horizon-ui/next/en/setup/auth/"
+              target="_blank"
+              rel="noreferrer noopener"
+            >Setup → Auth</a>
+            for backend selection, user / role schema, and an LDAP example.
+          </p>
+        </div>
+
         <label class="field">
           <span>Username</span>
           <input
@@ -124,6 +148,7 @@ async function submit(): Promise<void> {
             name="username"
             autocomplete="username"
             autofocus
+            :disabled="unconfigured"
             required
           />
         </label>
@@ -135,14 +160,15 @@ async function submit(): Promise<void> {
             type="password"
             name="password"
             autocomplete="current-password"
+            :disabled="unconfigured"
             required
           />
         </label>
 
         <div v-if="auth.loginError" class="error">{{ auth.loginError }}</div>
 
-        <button class="sign-in" type="submit" :disabled="submitting">
-          {{ submitting ? 'Signing in…' : 'Sign in' }}
+        <button class="sign-in" type="submit" :disabled="submitting || unconfigured">
+          {{ unconfigured ? 'Sign in disabled' : (submitting ? 'Signing in…' : 'Sign in') }}
         </button>
       </form>
     </main>
@@ -299,6 +325,66 @@ async function submit(): Promise<void> {
   color: var(--sw-info);
   background: rgba(56, 189, 248, 0.15);
   border-color: rgba(56, 189, 248, 0.5);
+}
+.pill-warn {
+  color: var(--sw-warn, #f59e0b);
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.5);
+}
+.pill-warn .status-dot {
+  box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.45);
+  animation: pulse-warn 1.6s ease-out infinite;
+}
+@keyframes pulse-warn {
+  0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.45); }
+  80% { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+}
+
+/* First-touch setup-required banner — appears above the form fields
+   when `/api/auth/health` reports `configured: false`. */
+.setup-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  margin: 0 0 4px;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: var(--sw-fg-0);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.setup-banner-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--sw-warn, #f59e0b);
+}
+.setup-banner-icon {
+  font-size: 14px;
+}
+.setup-banner-body {
+  margin: 0;
+  color: var(--sw-fg-1);
+}
+.setup-banner-foot {
+  margin: 0;
+  color: var(--sw-fg-2);
+  font-size: 12px;
+}
+.setup-banner-foot a {
+  color: var(--sw-accent);
+  text-decoration: underline;
+}
+.field input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.sign-in:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 @keyframes pulse {
   0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.45); }

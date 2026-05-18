@@ -27,6 +27,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import type { ConfigSource } from '../config/loader.js';
+import { isAuthConfigured } from '../config/loader.js';
 import type { LdapHealth } from '../user/ldap-health.js';
 
 export interface AuthHealthRouteDeps {
@@ -36,6 +37,16 @@ export interface AuthHealthRouteDeps {
 
 export interface AuthHealthBody {
   backend: 'local' | 'ldap';
+  /** False when auth isn't wired (local backend with no users, or LDAP
+   *  backend without `auth.ldap` / with empty `groupMappings`). The BFF
+   *  boots in this state; the login page reads this flag to render a
+   *  setup-required banner and disable the form, so first-touch
+   *  operators see the next step in the browser rather than only in
+   *  container logs. */
+  configured: boolean;
+  /** Operator-facing hint when `configured` is false. Empty string
+   *  otherwise. Never leaks DNs or secrets. */
+  setupHint: string;
   ldap: null | {
     reachable: boolean;
     /** Hostname only — port and full DN are admin-only. */
@@ -50,6 +61,21 @@ export interface AuthHealthBody {
      *  given the current LDAP health. */
     armed: boolean;
   };
+}
+
+function setupHintFor(cfg: import('../config/schema.js').HorizonConfig): string {
+  if (cfg.auth.backend === 'local' && cfg.auth.local.users.length === 0) {
+    return 'No users configured. Add at least one entry to auth.local.users in horizon.yaml (use `pnpm --filter bff cli:hash` for the password hash) or switch to LDAP.';
+  }
+  if (cfg.auth.backend === 'ldap') {
+    if (!cfg.auth.ldap) {
+      return 'LDAP backend selected but auth.ldap block is missing. Configure the directory connection in horizon.yaml or switch to local users.';
+    }
+    if (cfg.auth.ldap.groupMappings.length === 0) {
+      return 'LDAP backend has no group → role mappings. Add at least one auth.ldap.groupMappings entry (use `group: "*"` to assign a fallback role to every authenticated user).';
+    }
+  }
+  return '';
 }
 
 function hostnameOf(url: string): string {
@@ -82,8 +108,11 @@ export function registerAuthHealthRoute(app: FastifyInstance, deps: AuthHealthRo
       };
     }
     const breakGlassArmed = !!cfg.auth.breakGlass && (ldap === null ? false : !ldap.reachable);
+    const configured = isAuthConfigured(cfg);
     const body: AuthHealthBody = {
       backend: cfg.auth.backend,
+      configured,
+      setupHint: configured ? '' : setupHintFor(cfg),
       ldap,
       breakGlass: { armed: breakGlassArmed },
     };

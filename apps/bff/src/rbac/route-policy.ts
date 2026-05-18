@@ -212,8 +212,13 @@ export function makeRouteAuthHook(deps: AuthDeps) {
     let chosen: RoutePolicy | null = null;
     let chosenKey: string | null = null;
     for (const m of methods) {
-      const key = `${String(m).toUpperCase()} ${route.url}`;
-      const p = ROUTE_POLICY[key];
+      const M = String(m).toUpperCase();
+      const key = `${M} ${route.url}`;
+      // Fastify auto-registers HEAD for every GET (RFC-correct: HEAD
+      // returns the same data with no body). Same data → same RBAC, so
+      // fall back to the GET sibling's policy when HEAD isn't enumerated
+      // explicitly. The policy table only carries GET entries.
+      const p = ROUTE_POLICY[key] ?? (M === 'HEAD' ? ROUTE_POLICY[`GET ${route.url}`] : undefined);
       if (p === undefined) continue;
       if (chosen !== null && chosen !== p) {
         logger.warn(

@@ -19,6 +19,14 @@ import type { BffClient } from '../client';
 
 export interface AuthHealth {
   backend: 'local' | 'ldap';
+  /** False when auth isn't wired (local backend with no users, or LDAP
+   *  backend without `auth.ldap` / with empty `groupMappings`). The BFF
+   *  boots in this state; the login page renders a setup-required
+   *  banner and disables the form. */
+  configured: boolean;
+  /** Operator-facing hint when `configured` is false. Empty string
+   *  otherwise. Never leaks DNs or secrets. */
+  setupHint: string;
   ldap: null | {
     reachable: boolean;
     host: string;
