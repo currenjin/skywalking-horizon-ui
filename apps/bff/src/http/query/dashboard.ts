@@ -489,7 +489,7 @@ export function registerDashboardQueryRoute(app: FastifyInstance, deps: Dashboar
           })),
         );
       }
-      let data: Record<string, MqeResultShape> = {};
+      const data: Record<string, MqeResultShape> = {};
       try {
         const chunkResults = await Promise.all(
           widgetChunks.map(async (chunk) => {

@@ -234,38 +234,48 @@ const sessionSchema = z
   .strict()
   .default({ ttlMinutes: 60, cookieName: 'horizon_sid', cookieSecure: false });
 
+// Env-var-overridable defaults for the four state-file paths. The
+// Docker image sets `HORIZON_*_FILE=/data/...` so an operator running
+// the published image without a custom `horizon.yaml` (or with one
+// that omits these blocks) gets writes routed to the writable `/data`
+// volume instead of `/app` (which is root-owned and EACCESes).
+const auditDefault = process.env.HORIZON_AUDIT_FILE ?? './horizon-audit.jsonl';
+const setupDefault = process.env.HORIZON_SETUP_FILE ?? './horizon-setup.json';
+const alarmsDefault = process.env.HORIZON_ALARMS_FILE ?? './horizon-alarms.json';
+const wireLogDefault = process.env.HORIZON_WIRE_LOG_FILE ?? './horizon-wire.jsonl';
+
 const auditSchema = z
   .object({
-    file: z.string().default('./horizon-audit.jsonl'),
+    file: z.string().default(auditDefault),
   })
   .strict()
-  .default({ file: './horizon-audit.jsonl' });
+  .default({ file: auditDefault });
 
 const setupSchema = z
   .object({
-    file: z.string().default('./horizon-setup.json'),
+    file: z.string().default(setupDefault),
   })
   .strict()
-  .default({ file: './horizon-setup.json' });
+  .default({ file: setupDefault });
 
 const alarmsSchema = z
   .object({
-    file: z.string().default('./horizon-alarms.json'),
+    file: z.string().default(alarmsDefault),
   })
   .strict()
-  .default({ file: './horizon-alarms.json' });
+  .default({ file: alarmsDefault });
 
 const debugLogSchema = z
   .object({
     enabled: z.boolean().default(false),
-    file: z.string().default('./horizon-wire.jsonl'),
+    file: z.string().default(wireLogDefault),
     maxBodyChars: z.number().int().nonnegative().default(8192),
     redactAuthHeaders: z.boolean().default(true),
   })
   .strict()
   .default({
     enabled: false,
-    file: './horizon-wire.jsonl',
+    file: wireLogDefault,
     maxBodyChars: 8192,
     redactAuthHeaders: true,
   });

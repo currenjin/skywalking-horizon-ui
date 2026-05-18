@@ -19,7 +19,6 @@ import { computed } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
 import type { PreflightResult } from '@skywalking-horizon-ui/api-client';
 import { bffClient } from '@/api/client';
-import { useAutoRefreshSubscribe } from '../controls/useAutoRefreshSubscribe';
 
 /**
  * Admin-port preflight — interrogates OAP's `/debugging/config/dump`
@@ -44,8 +43,6 @@ export function useAdminFeatures() {
     refetchInterval: 60_000,
     refetchOnWindowFocus: true,
   });
-
-  useAutoRefreshSubscribe(() => q.refetch());
 
   const result = computed<PreflightResult | null>(() => q.data.value ?? null);
   const adminReachable = computed<boolean>(() => result.value?.adminReachable ?? false);

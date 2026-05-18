@@ -115,7 +115,7 @@ export function resolveServiceIdentity(
   // cluster rule captures `mesh-svr::reviews` as the service, and we
   // then split off `mesh-svr` here).
   let legacyGroup: string | null = null;
-  let workingName = r;
+  const workingName = r;
 
   // Cluster rule first.
   const re = compileRule(rule);

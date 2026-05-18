@@ -49,6 +49,7 @@ import { registerAsyncProfileRoutes } from './http/query/async-profile.js';
 // Config (CRUD for templates / settings)
 import { registerDashboardConfigRoute } from './http/config/dashboard.js';
 import { registerLayerTemplateRoutes } from './http/config/layer-template.js';
+import { startLayerTemplateWatcher } from './logic/layers/loader.js';
 import { registerAlarmsConfigRoutes } from './http/config/alarms.js';
 import { registerSetupRoutes } from './http/config/setup.js';
 import { registerOverviewRoutes } from './http/config/overview.js';
@@ -158,6 +159,10 @@ registerAsyncProfileRoutes(app, { config: source, sessions });
 // ── Config ─────────────────────────────────────────────────────────
 registerDashboardConfigRoute(app, { config: source, sessions });
 registerLayerTemplateRoutes(app, { config: source, sessions });
+// Spawn the bundled-template fs.watch once per process. Skipped in
+// tests (each test file imports the loader; a watcher per import
+// EMFILEs CI under low ulimits). Production calls this exactly once.
+if (process.env.NODE_ENV !== 'test') startLayerTemplateWatcher();
 registerAlarmsConfigRoutes(app, { config: source, sessions, audit, store: alarmsStore, serviceLayer });
 registerSetupRoutes(app, { config: source, sessions, audit, store: setupStore });
 registerOverviewRoutes(app, { config: source, sessions });

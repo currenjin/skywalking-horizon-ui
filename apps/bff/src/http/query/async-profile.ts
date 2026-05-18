@@ -59,6 +59,19 @@ export interface AsyncProfileRouteDeps {
   fetch?: FetchLike;
 }
 
+/** Bound the per-service task-list page. Default 500 is enough for the
+ *  Profiling tab's "recent tasks" rail; large fleets can opt up to 5000
+ *  via `?limit=`. The OAP query carries no built-in cap, so an unbounded
+ *  default would page-fault the BFF on services with years of history. */
+const DEFAULT_TASK_LIST_LIMIT = 500;
+const MAX_TASK_LIST_LIMIT = 5000;
+function clampTaskListLimit(raw: string | undefined): number {
+  if (!raw) return DEFAULT_TASK_LIST_LIMIT;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_TASK_LIST_LIMIT;
+  return Math.min(Math.floor(n), MAX_TASK_LIST_LIMIT);
+}
+
 // ── Async profiler queries ──────────────────────────────────────────
 
 const LIST_SERVICES_FOR_RESOLVE = /* GraphQL */ `
@@ -202,17 +215,18 @@ export function registerAsyncProfileRoutes(
     { preHandler: auth },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const params = req.params as { key: string };
-      const q = req.query as { service?: string };
+      const q = req.query as { service?: string; limit?: string };
       const serviceArg = (q.service ?? '').trim();
       const payload: AsyncProfilingTaskListResponse = { tasks: [], reachable: true };
       if (!serviceArg) return reply.send(payload);
       const opts = buildOapOpts(deps.config.current, deps.fetch);
+      const limit = clampTaskListLimit(q.limit);
       try {
         const serviceId = await resolveServiceId(opts, params.key, serviceArg);
         if (!serviceId) return reply.send(payload);
         const data = await graphqlPost<{
           asyncTaskList: { errorReason?: string; tasks: AsyncProfilingTaskListResponse['tasks'] };
-        }>(opts, GET_ASYNC_TASK_LIST, { request: { serviceId, limit: 10000 } });
+        }>(opts, GET_ASYNC_TASK_LIST, { request: { serviceId, limit } });
         payload.tasks = data.asyncTaskList?.tasks ?? [];
         payload.errorReason = data.asyncTaskList?.errorReason;
         return reply.send(payload);
@@ -291,17 +305,18 @@ export function registerAsyncProfileRoutes(
     { preHandler: auth },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const params = req.params as { key: string };
-      const q = req.query as { service?: string };
+      const q = req.query as { service?: string; limit?: string };
       const serviceArg = (q.service ?? '').trim();
       const payload: PprofTaskListResponse = { tasks: [], reachable: true };
       if (!serviceArg) return reply.send(payload);
       const opts = buildOapOpts(deps.config.current, deps.fetch);
+      const limit = clampTaskListLimit(q.limit);
       try {
         const serviceId = await resolveServiceId(opts, params.key, serviceArg);
         if (!serviceId) return reply.send(payload);
         const data = await graphqlPost<{
           pprofTaskList: { errorReason?: string; tasks: PprofTaskListResponse['tasks'] };
-        }>(opts, GET_PPROF_TASK_LIST, { request: { serviceId, limit: 10000 } });
+        }>(opts, GET_PPROF_TASK_LIST, { request: { serviceId, limit } });
         payload.tasks = data.pprofTaskList?.tasks ?? [];
         payload.errorReason = data.pprofTaskList?.errorReason;
         return reply.send(payload);

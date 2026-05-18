@@ -91,6 +91,7 @@ export const ROUTE_POLICY: Record<string, RoutePolicy> = {
 
   // ── Logs (read) ──────────────────────────────────────────────────
   'POST /api/layer/:key/logs':                     'logs:read',
+  'POST /api/layer/:key/logs/facets':              'logs:read',
   'GET /api/log-tags/keys':                        'logs:read',
   'GET /api/log-tags/values':                      'logs:read',
 
@@ -131,7 +132,8 @@ export const ROUTE_POLICY: Record<string, RoutePolicy> = {
   'GET /api/layer/:key/ebpf/network/tasks':        'profile:read',
   'POST /api/layer/:key/ebpf/network/tasks':       'profile:enable',
   'GET /api/ebpf/network/tasks':                   'profile:read',
-  'POST /api/ebpf/network/topology':               'profile:read',
+  'POST /api/ebpf/network/tasks':                  'profile:enable',
+  'GET /api/ebpf/network/topology':                'profile:read',
   'POST /api/ebpf/network/tasks/:taskId/keep-alive': 'profile:enable',
 
   // ── Config — alarm-page setup, layer setup, overview, dashboards ─
@@ -224,11 +226,21 @@ export function makeRouteAuthHook(deps: AuthDeps) {
       chosenKey = key;
     }
     if (chosen === null) {
-      // Don't gate health/metrics endpoints registered late in startup.
+      // Don't gate Fastify's catch-all SPA fallback or any non-API route.
       if (route.url === '*' || route.url.startsWith('/metrics')) return;
+      // For `/api/*` routes a missing policy entry is a hard error —
+      // silently defaulting to auth-only is how unintended write
+      // endpoints (create-task, log-facets, etc.) end up reachable by
+      // any logged-in viewer. Fail loudly at registration time so the
+      // gap surfaces in CI / first boot, not at exploit time.
+      if (route.url.startsWith('/api/')) {
+        const msg = `rbac: route ${String(methods)} ${route.url} has no entry in ROUTE_POLICY; add one in apps/bff/src/rbac/route-policy.ts`;
+        logger.error({ method: methods, url: route.url }, msg);
+        throw new Error(msg);
+      }
       logger.warn(
         { method: methods, url: route.url },
-        'rbac: route has no policy entry; defaulting to auth-only',
+        'rbac: non-api route has no policy entry; defaulting to auth-only',
       );
       chosen = 'auth';
     }

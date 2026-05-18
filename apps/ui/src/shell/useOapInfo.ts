@@ -17,7 +17,6 @@
 
 import { computed } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
-import { useAutoRefreshSubscribe } from '../controls/useAutoRefreshSubscribe';
 import {
   parseOapTimezoneMinutes,
   type OapCapabilities,
@@ -97,9 +96,6 @@ export function useOapInfo() {
     if (healthScore.value > 0) return 'warn';
     return 'ok';
   });
-
-  useAutoRefreshSubscribe(() => q.refetch());
-
 
   return {
     isLoading: q.isLoading,

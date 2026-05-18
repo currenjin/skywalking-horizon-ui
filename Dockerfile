@@ -54,20 +54,37 @@ WORKDIR /app
 # Run as a non-root user — the BFF doesn't need any privileged access.
 RUN addgroup -S horizon && adduser -S -G horizon horizon
 
+# Read-only artifacts (code, deps, static assets, example config) — owned
+# by root, world-readable. The BFF never writes here.
 COPY --from=builder /deploy/bff/dist ./dist
 COPY --from=builder /deploy/bff/node_modules ./node_modules
 COPY --from=builder /deploy/bff/package.json ./package.json
-# The bundled layer + overview JSONs must sit one level up from the
-# compiled server (`/app/dist/server.js`). The loader resolves them via
-# `path.join(__dirname, '..', 'bundled_templates', ...)` — keeping this
-# layout in sync with the source tree means no path remapping at boot.
-COPY --from=builder /workspace/apps/bff/src/bundled_templates ./bundled_templates
 COPY --from=builder /workspace/apps/ui/dist ./static
 COPY --from=builder /workspace/horizon.example.yaml ./horizon.example.yaml
 
+# `bundled_templates/` is writable: the admin Layer-Templates and
+# Overview-Templates editors `writeFileSync` into the per-key/per-id
+# JSON files here. Must be owned by the `horizon` user, otherwise admin
+# saves EACCES. The loader still resolves the directory via
+# `__dirname/../bundled_templates`, so the path layout stays in sync
+# with the source tree.
+COPY --from=builder --chown=horizon:horizon /workspace/apps/bff/src/bundled_templates ./bundled_templates
+
+# `/data` is the writable state directory the BFF writes its runtime
+# files into (audit log, setup state, alarm state, wire debug log).
+# Operators can mount a PVC / named volume / host bind at /data and
+# the configured paths below land on durable storage. Without this
+# mount the writes go to the container's writable layer (ephemeral).
+RUN mkdir -p /data && chown horizon:horizon /data
+VOLUME ["/data"]
+
 ENV NODE_ENV=production \
     HORIZON_STATIC_DIR=/app/static \
-    HORIZON_CONFIG=/app/horizon.yaml
+    HORIZON_CONFIG=/app/horizon.yaml \
+    HORIZON_AUDIT_FILE=/data/horizon-audit.jsonl \
+    HORIZON_SETUP_FILE=/data/horizon-setup.json \
+    HORIZON_ALARMS_FILE=/data/horizon-alarms.json \
+    HORIZON_WIRE_LOG_FILE=/data/horizon-wire.jsonl
 
 USER horizon
 EXPOSE 8081

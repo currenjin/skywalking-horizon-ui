@@ -252,7 +252,7 @@ export function createOverviewDashboard(dash: OverviewDashboard): void {
    * exactly. Sanitise to guard against accidental path traversal —
    * loader id-equality is what really binds the file to the
    * dashboard, but the operator's also editing on disk later. */
-  const safe = dash.id.replace(/[^A-Za-z0-9_\-]/g, '_');
+  const safe = dash.id.replace(/[^A-Za-z0-9_-]/g, '_');
   const file = path.join(CONFIG_DIR, `${safe}.json`);
   fs.writeFileSync(file, JSON.stringify(dash, null, 2), 'utf8');
   invalidateOverviewCache();

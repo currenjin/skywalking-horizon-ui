@@ -599,19 +599,40 @@ export function reloadLayerTemplates(): void {
  * Errors are swallowed — a missing config dir is an existing
  * problem the loader surfaces elsewhere; failing to watch shouldn't
  * crash the BFF.
+ *
+ * MUST be called explicitly from `server.ts` rather than running at
+ * import. Each test file that imports this module would otherwise
+ * spawn its own fd, and large test suites EMFILE on low-ulimit
+ * machines. Production calls `startLayerTemplateWatcher()` once during
+ * server boot; tests skip it entirely.
  */
 let watchTimer: NodeJS.Timeout | null = null;
-try {
-  fsWatch(CONFIG_DIR, (_event, filename) => {
-    if (!filename || !filename.endsWith('.json')) return;
-    if (watchTimer) clearTimeout(watchTimer);
-    watchTimer = setTimeout(() => {
-      cache = null;
-      watchTimer = null;
-    }, 50);
-  });
-} catch {
-  // Best-effort. If fs.watch isn't supported on this filesystem
-  // (e.g. some network FS), the operator can still reload through
-  // the admin save endpoint.
+let watcher: ReturnType<typeof fsWatch> | null = null;
+export function startLayerTemplateWatcher(): void {
+  if (watcher) return;
+  try {
+    watcher = fsWatch(CONFIG_DIR, (_event, filename) => {
+      if (!filename || !filename.endsWith('.json')) return;
+      if (watchTimer) clearTimeout(watchTimer);
+      watchTimer = setTimeout(() => {
+        cache = null;
+        watchTimer = null;
+      }, 50);
+    });
+  } catch {
+    // Best-effort. If fs.watch isn't supported on this filesystem
+    // (e.g. some network FS), the operator can still reload through
+    // the admin save endpoint.
+  }
+}
+/** Tear down the watcher — for graceful shutdown + test cleanup. */
+export function stopLayerTemplateWatcher(): void {
+  if (watchTimer) {
+    clearTimeout(watchTimer);
+    watchTimer = null;
+  }
+  if (watcher) {
+    watcher.close();
+    watcher = null;
+  }
 }
