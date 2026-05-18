@@ -88,17 +88,40 @@ Horizon UI is built against the SkyWalking OAP GraphQL query-protocol (same sche
 
 ## Development
 
-Requires Node.js 20+.
+Requires Node.js 20+ and pnpm 10+ (pinned via Corepack in `package.json`).
 
 ```bash
-npm install
-npm run dev          # vite dev server (proxies /graphql to http://127.0.0.1:12800)
-npm run build        # production build
-npm run type-check
-npm run lint
-npm run test:unit
-npm run license:check
+pnpm install                     # one-time / after lockfile changes; auto-builds workspace packages via `prepare`
+
+# Dev loop (hot-reload, verbose pretty logs)
+pnpm --filter bff dev            # BFF on :8081 with NODE_ENV=development → debug level + per-request access logs
+pnpm --filter ui dev             # Vite dev server on :9091, proxies /api to the BFF
+
+# Static checks / tests
+pnpm -r type-check
+pnpm -r lint                     # read-only; `pnpm -r lint:fix` to mutate
+pnpm -r test:unit
+pnpm license:check               # CI gate via skywalking-eyes
+
+# Self-contained "binary mode" — produces ./dist/ that boots with `node dist/server.js`
+pnpm package
+HORIZON_CONFIG=./horizon.yaml HORIZON_STATIC_DIR=./dist/static node dist/server.js
+
+# Container — Docker just copies in the pre-built dist (no compile in image)
+docker build -t horizon-ui:local .
+docker run --rm -p 8081:8081 -v "$PWD/horizon.yaml:/app/horizon.yaml:ro" horizon-ui:local
 ```
+
+### Logging
+
+The BFF uses [pino](https://github.com/pinojs/pino). Two modes, picked from `NODE_ENV`:
+
+| Mode | When | Format | Default level |
+|---|---|---|---|
+| **Dev** | `pnpm --filter bff dev` (sets `NODE_ENV=development`) | Pretty, colorized, via `pino-pretty` | `debug` + per-request access logs |
+| **Prod** | Everything else — `node dist/server.js`, Docker container, CI | One JSON object per line on stdout | `error` — quiet by default |
+
+Adjust with `LOG_LEVEL`: `info` opens per-request access logs in prod, `debug` adds lifecycle chatter, `trace` is everything. Genuine request errors stay logged at `error` under any default that includes `error`. See [docs/setup/container-image.md → Logging](docs/setup/container-image.md#logging) for the three orthogonal channels (app logs, audit log, wire-debug log) and example `jq` recipes.
 
 ## License
 

@@ -17,14 +17,23 @@
 
 import pino, { type LoggerOptions } from 'pino';
 
-const isDev = process.env.NODE_ENV !== 'production';
+// Production unless explicitly opted into dev. Matters because the
+// "production target" includes both `node dist/server.js` (local
+// binary) and the Docker image — both should be quiet by default and
+// emit machine-readable JSON for log aggregators. Only `pnpm dev` /
+// `tsx watch` flips into dev mode (its `dev` script sets
+// NODE_ENV=development).
+const isDev = process.env.NODE_ENV === 'development';
 
 /**
  * Default log level:
- *   - dev: `debug` (verbose, helpful while iterating)
- *   - prod: `error` (quiet by default — Fastify's per-request `info`
- *     access logs are suppressed; only warnings, errors, and fatals
- *     reach stdout)
+ *   - dev (`NODE_ENV=development`, e.g. `pnpm --filter bff dev`):
+ *     `debug` — verbose lifecycle + per-request access logs, pretty-
+ *     printed via `pino-pretty` for human reading.
+ *   - prod (anything else, incl. local `node dist/server.js` and the
+ *     Docker image): `error` — quiet by default. Fastify's per-request
+ *     `info` access logs are suppressed; only warnings, errors, and
+ *     fatals reach stdout as JSON.
  *
  * Operators turn it up explicitly when triaging: `LOG_LEVEL=info` for
  * access logs, `LOG_LEVEL=debug` for the lifecycle chatter, `trace`

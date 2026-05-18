@@ -224,8 +224,8 @@ The BFF uses [pino](https://github.com/pinojs/pino) and writes **structured JSON
 
 | Mode | How to enter | Output |
 |---|---|---|
-| Production | The image sets `NODE_ENV=production`. Local: `NODE_ENV=production node dist/server.js`. | One JSON object per line on stdout. **Default level `error`** — quiet by default; only warnings, errors, and fatals reach stdout. Fields: `level`, `time`, `pid`, `hostname`, plus per-event keys (`reqId`, `req`, `res`, `responseTime`, `msg`, …). |
-| Development | The local binary defaults to dev (`NODE_ENV` unset). | Pretty-printed, colorized, with timestamps via `pino-pretty`. Default level `debug`. Same fields, human-readable. |
+| Production | The image sets `NODE_ENV=production`. Anything that isn't explicitly `NODE_ENV=development` is treated as production — including the local binary `node dist/server.js`. | One JSON object per line on stdout. **Default level `error`** — quiet by default; only warnings, errors, and fatals reach stdout. Fields: `level`, `time`, `pid`, `hostname`, plus per-event keys (`reqId`, `req`, `res`, `responseTime`, `msg`, …). |
+| Development | `pnpm --filter bff dev` (the `dev` script sets `NODE_ENV=development` explicitly). | Pretty-printed, colorized, with timestamps via `pino-pretty`. **Default level `debug`** — full lifecycle chatter + per-request access logs. Human-readable. |
 
 Adjust the floor with `LOG_LEVEL` when triaging:
 
