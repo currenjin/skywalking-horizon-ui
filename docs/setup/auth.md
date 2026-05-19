@@ -1,4 +1,4 @@
-# `auth`
+# auth
 
 Authentication backend selection. Detailed per-backend configuration lives under [Access Control](../access-control/local-backend.md); this page is the `horizon.yaml` shape.
 

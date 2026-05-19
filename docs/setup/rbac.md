@@ -1,4 +1,4 @@
-# `rbac`
+# rbac
 
 Role-Based Access Control. Defines the role → verb grants and the post-login landing route per role. Full behavior reference (verb vocabulary, grant matching, where each verb gates) is in [Access Control → RBAC: Roles & Verbs](../access-control/rbac.md); this page is the `horizon.yaml` shape.
 

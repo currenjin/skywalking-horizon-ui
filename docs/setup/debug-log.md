@@ -1,4 +1,4 @@
-# `debugLog`
+# debugLog
 
 Wire-level HTTP request/response log for troubleshooting OAP communication. **Off by default.** Very verbose — only use when actively debugging.
 

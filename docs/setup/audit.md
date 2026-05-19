@@ -1,4 +1,4 @@
-# `audit`
+# audit
 
 Audit log file path. The format and event schema are documented in [Access Control → Audit Log](../access-control/audit-log.md); this page is the `horizon.yaml` shape.
 

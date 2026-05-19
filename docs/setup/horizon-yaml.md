@@ -1,4 +1,4 @@
-# `horizon.yaml` Reference
+# horizon.yaml Reference
 
 `horizon.yaml` is the single configuration file for the Horizon BFF. The schema is enforced by Zod (`apps/bff/src/config/schema.ts`); validation runs at startup and again on every hot reload. A file that fails validation is **rejected**; the BFF keeps the previously valid config rather than serving with broken settings.
 

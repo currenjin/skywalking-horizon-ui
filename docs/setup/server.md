@@ -1,4 +1,4 @@
-# `server`
+# server
 
 HTTP listener for the Horizon BFF. Also serves the built UI as static assets when `staticDir` is set.
 

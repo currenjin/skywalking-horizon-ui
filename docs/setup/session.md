@@ -1,4 +1,4 @@
-# `session`
+# session
 
 HTTP session cookie configuration.
 

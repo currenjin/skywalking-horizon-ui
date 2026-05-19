@@ -1,4 +1,4 @@
-# `setup` and `alarms`
+# setup and alarms
 
 State files for user-configured settings. Both write JSON, both are managed by the BFF, neither needs hand-editing.
 
