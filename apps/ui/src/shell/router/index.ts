@@ -20,23 +20,15 @@ import { pushEvent } from '@/controls/eventLog';
 
 const placeholder = () => import('@/shell/PlaceholderView.vue');
 
-function humanKey(k: string): string {
-  return k.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
 // Layer sub-routes nest under a single LayerShell route so every tab
 // shares the header KPI strip + cap-driven tab navigation. The shell
 // reads `:layerKey` from the URL and pulls layer config / live data.
 // Sub-route components fill the tab body via a nested router-view.
+// The canonical landing is `/service` — that's the widget-grid view
+// operators see when they click a layer. Every layer sub-tab now
+// has its own dedicated component; the earlier `placeholderTabs`
+// array (for tabs awaiting their per-page treatment) is gone.
 function layerRoute(): RouteRecordRaw {
-  // Per-layer sub-routes that still render generic placeholders until
-  // their phases land. The canonical landing is `/service` — that's
-  // the widget-grid view operators see when they click a layer.
-  // Tabs that still don't have a per-scope dashboard set. Topology +
-  // dependency + logs need their own page treatments (Phase 4 / 5);
-  // their JSON template `components.*` flag still gates the sidebar
-  // entry, this just keeps the URL routing legible.
-  const placeholderTabs: { path: string; label: string; phase: string }[] = [];
   return {
     path: 'layer/:layerKey',
     component: () => import('@/layer/LayerShell.vue'),
@@ -109,14 +101,6 @@ function layerRoute(): RouteRecordRaw {
         path: 'traces',
         redirect: (to) => ({ path: `/layer/${to.params.layerKey}/trace`, query: to.query }),
       },
-      ...placeholderTabs.map<RouteRecordRaw>((f) => ({
-        path: f.path,
-        component: () => import('@/layer/LayerTabPlaceholder.vue'),
-        props: (r) => ({
-          title: `${humanKey(String(r.params.layerKey))} · ${f.label}`,
-          phase: f.phase,
-        }),
-      })),
     ],
   };
 }

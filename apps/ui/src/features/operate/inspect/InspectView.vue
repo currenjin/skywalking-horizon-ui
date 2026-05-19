@@ -1142,7 +1142,6 @@ function scopeShort(scope: InspectScope): string {
     <AdminFeatureWarning module="inspect" feature-label="Inspect" />
     <header class="ins__header">
       <h1 class="ins__h1">Inspect</h1>
-      <span class="ins__sub">SWIP-14</span>
       <div class="ins__spacer" />
       <span v-if="catalogQuery.isFetching.value" class="ins__refreshing">refreshing…</span>
       <Btn @click="refreshEverything">refresh</Btn>
@@ -1580,7 +1579,6 @@ function scopeShort(scope: InspectScope): string {
 
 .ins__header { display: flex; align-items: center; gap: 12px; }
 .ins__h1 { margin: 0; font-family: var(--rr-font-ui); font-weight: 500; font-size: 14px; color: var(--rr-heading); }
-.ins__sub { font-family: var(--rr-font-mono); font-size: 11.5px; color: var(--rr-dim); }
 .ins__spacer { flex: 1 1 auto; }
 .ins__refreshing {
   font-family: var(--rr-font-mono);
