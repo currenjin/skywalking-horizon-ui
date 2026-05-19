@@ -40,7 +40,6 @@ import {
   findOverviewFile,
   getOverviewDashboard,
   loadOverviewDashboards,
-  writeOverviewDashboard,
 } from '../../logic/overview/loader.js';
 
 export interface OverviewTemplatesAdminDeps {
@@ -151,35 +150,6 @@ export function registerOverviewTemplatesAdminRoutes(
         dashboard: dash,
         editable: !!findOverviewFile(id),
       });
-    },
-  );
-
-  /* POST /api/admin/overview-templates/:id — write back. The body
-   * MUST have the same `id` as the URL param (defensive against
-   * accidental cross-dashboard overwrites). */
-  app.post(
-    '/api/admin/overview-templates/:id',
-    { preHandler: auth },
-    async (req: FastifyRequest, reply: FastifyReply) => {
-      const { id } = req.params as { id: string };
-      const parsed = dashboardSchema.safeParse(req.body);
-      if (!parsed.success) {
-        return reply.code(400).send({ error: 'invalid_body', detail: parsed.error.flatten() });
-      }
-      if (parsed.data.id !== id) {
-        return reply
-          .code(400)
-          .send({ error: 'id_mismatch', urlId: id, bodyId: parsed.data.id });
-      }
-      try {
-        writeOverviewDashboard(id, parsed.data as OverviewDashboard);
-      } catch (err) {
-        return reply.code(500).send({
-          error: 'write_failed',
-          message: err instanceof Error ? err.message : String(err),
-        });
-      }
-      return reply.send({ ok: true, id });
     },
   );
 

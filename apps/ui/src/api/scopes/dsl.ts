@@ -28,7 +28,7 @@ import type {
   RuleSource,
 } from '@skywalking-horizon-ui/api-client';
 import type { BffClient, ClusterStateResponse } from '../client';
-import { BffApiError } from '../client';
+import { BffApiError, withBase } from '../client';
 import { pushEvent } from '@/controls/eventLog';
 
 /** `bff.dsl` — DSL Management: rule catalog browse, single-rule fetch /
@@ -63,7 +63,7 @@ export class DslApi {
     const path = `/api/rule?${params.toString()}`;
     let res: Response;
     try {
-      res = await fetch(path, {
+      res = await fetch(withBase(path), {
         method: 'GET',
         credentials: 'include',
         headers: { Accept: 'application/x-yaml' },
@@ -106,7 +106,7 @@ export class DslApi {
     if (args.allowStorageChange) params.set('allowStorageChange', 'true');
     if (args.force) params.set('force', 'true');
     const path = `/api/rule?${params.toString()}`;
-    const res = await fetch(path, {
+    const res = await fetch(withBase(path), {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'text/plain' },
@@ -143,7 +143,7 @@ export class DslApi {
 
   /** Returns the raw `.oal` text or `null` on 404. */
   async oalFileContent(name: string): Promise<string | null> {
-    const res = await fetch(`/api/oal/files/${encodeURIComponent(name)}`, {
+    const res = await fetch(withBase(`/api/oal/files/${encodeURIComponent(name)}`), {
       method: 'GET',
       credentials: 'include',
       headers: { Accept: 'text/plain' },

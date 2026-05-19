@@ -47,7 +47,7 @@ Source: `apps/bff/src/rbac/verbs.ts`. Twenty-eight verbs grouped into areas:
 
 | Verb | Gates |
 |---|---|
-| `cluster:read` | Cluster Status page (`/admin/cluster`). |
+| `cluster:read` | Cluster Status page (`/operate/cluster`). |
 | `inspect:read` | Inspect page (`/admin/inspect`). |
 
 ### Admin surface
@@ -139,9 +139,9 @@ Default mapping:
 ```yaml
 landingByRole:
   viewer:     /
-  maintainer: /admin/cluster
+  maintainer: /operate/cluster
   operator:   /
-  admin:      /admin/cluster
+  admin:      /operate/cluster
 ```
 
 When a user has multiple roles, the **first role on the user** wins. Order matters in `auth.local.users[].roles` and in LDAP group-mapping resolution.
@@ -215,7 +215,7 @@ roles:
   auditor:
     - "*:read"           # all reads only
 landingByRole:
-  auditor: /admin/cluster
+  auditor: /operate/cluster
 ```
 
 `*:read` grants every read — useful for audit access without write capability.

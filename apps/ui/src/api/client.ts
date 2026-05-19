@@ -47,6 +47,21 @@ import type {
 
 import { pushEvent } from '@/controls/eventLog';
 import { SessionApi } from './scopes/session';
+
+/** Deploy-base prefix for every API call. Pulled from Vite's
+ *  `BASE_URL` so the same build artifact works whether served at
+ *  `/` (default), `/horizon/` (behind a gateway), or any other
+ *  sub-path. Mirrors the router's `createWebHistory(BASE_URL)`
+ *  behavior — both must use the same prefix or the SPA navigates
+ *  to working URLs but its data calls 404. */
+const API_BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
+/** Prepend the deploy base to a path that starts with `/`. Exported
+ *  so the direct-fetch paths (configs.bundle's 304 detection, dsl's
+ *  text/plain responses) can apply the same prefix as the central
+ *  `BffClient.request` path. */
+export function withBase(path: string): string {
+  return API_BASE + path;
+}
 import { MenuApi } from './scopes/menu';
 import { OverviewApi } from './scopes/overview';
 import { SetupApi } from './scopes/setup';
@@ -579,9 +594,10 @@ export class BffClient {
       },
     };
     if (body !== undefined) init.body = JSON.stringify(body);
+    const url = withBase(path);
     let res: Response;
     try {
-      res = await fetch(path, init);
+      res = await fetch(url, init);
     } catch (err) {
       // Network-level failure: DNS, CORS, aborted, BFF down, etc.
       // fetch() doesn't throw on HTTP-level errors (4xx/5xx) — only on

@@ -44,6 +44,7 @@ import {
 import { CanvasRenderer } from 'echarts/renderers';
 import type { EChartsType } from 'echarts/core';
 import type { AlarmMqeMetric } from '@/api/client';
+import { readAccent } from '@/utils/cssVar';
 
 echarts.use([
   LineChart,
@@ -80,14 +81,22 @@ const props = withDefaults(
 );
 
 const MINUTE_MS = 60_000;
-const PALETTE = [
-  '#f97316',
-  '#60a5fa',
-  '#a78bfa',
-  '#22d3ee',
-  '#34d399',
-  '#f472b6',
-];
+
+/** Series palette. First entry tracks the active theme's `--sw-accent`
+ *  so the dominant series re-colors with the theme; the remaining
+ *  entries are intentionally varied for service-distinguishing. They
+ *  stay constant across themes because their job is "be a distinct
+ *  color," not "match brand". */
+function buildPalette(): string[] {
+  return [
+    readAccent('#f97316'),
+    '#60a5fa',
+    '#a78bfa',
+    '#22d3ee',
+    '#34d399',
+    '#f472b6',
+  ];
+}
 
 interface SeriesIn {
   label: string;
@@ -223,7 +232,8 @@ function buildOption(): echarts.EChartsCoreOption {
       splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
     },
     series: series.map((s, i) => {
-      const color = PALETTE[i % PALETTE.length];
+      const palette = buildPalette();
+      const color = palette[i % palette.length];
       const isOnly = series.length === 1;
       return {
         name: s.label,
@@ -261,7 +271,7 @@ function buildOption(): echarts.EChartsCoreOption {
                   {
                     xAxis: props.triggerTime,
                     label: {
-                      color: '#f97316',
+                      color: readAccent(),
                       formatter: `trigger ${fmtMinute(props.triggerTime)}`,
                     },
                   },

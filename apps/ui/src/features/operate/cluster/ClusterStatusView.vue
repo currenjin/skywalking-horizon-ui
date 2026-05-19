@@ -217,19 +217,6 @@ function refreshAll(): void {
         </tbody>
       </table>
     </section>
-
-    <!-- ── Coming-soon strip (storage / module-activity / TTL) ───── -->
-    <div class="phase-note">
-      <strong>Coming in Phase 6&nbsp;/&nbsp;7</strong>
-      <ul>
-        <li>Per-node cluster map (host/port, role, heartbeat)</li>
-        <li>Module activity matrix (module × provider × node)</li>
-        <li>Storage backend health (BanyanDB / Elasticsearch / JDBC)</li>
-        <li>Receiver activity (gRPC / HTTP / Kafka / OTLP throughput, queue depth)</li>
-        <li>Navigable effective-configuration tree with two-node diff</li>
-        <li>TTL &amp; retention grid (hot / warm / cold)</li>
-      </ul>
-    </div>
   </div>
 </template>
 
@@ -486,26 +473,4 @@ function refreshAll(): void {
   color: var(--sw-fg-3);
 }
 
-.phase-note {
-  background: var(--sw-bg-1);
-  border: 1px dashed var(--sw-line-2);
-  border-radius: 8px;
-  padding: 14px 16px;
-  margin-top: 20px;
-}
-.phase-note strong {
-  display: block;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--sw-accent);
-  margin-bottom: 8px;
-}
-.phase-note ul {
-  margin: 0;
-  padding-left: 18px;
-  color: var(--sw-fg-1);
-  font-size: 12px;
-  line-height: 1.7;
-}
 </style>

@@ -37,7 +37,7 @@ If you only need triage (dashboards, alarms, traces, logs), v10 is sufficient. I
 Once Horizon is up:
 
 - **Topbar status chip** — small build-version pill in the right-side cluster strip, fed by the GraphQL `version` query.
-- **Cluster Status page → Query pane** (`/admin/cluster`) — version, server timezone, current timestamp, health score.
+- **Cluster Status page → Query pane** (`/operate/cluster`) — version, server timezone, current timestamp, health score.
 
 The version is fetched via:
 

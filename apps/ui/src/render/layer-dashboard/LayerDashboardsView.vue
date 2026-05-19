@@ -448,7 +448,7 @@ function isVisible(
   }
   if (cond.startsWith('#entity.')) {
     // Entity-attribute predicates need an attributes feed we don't
-    // surface yet (Phase 7-ish). Render the widget for now.
+    // surface yet. Render the widget unconditionally for now.
     return true;
   }
   return true;
@@ -618,7 +618,7 @@ function isVisible(
 
     <div v-if="configLoading" class="empty">Loading dashboard config…</div>
     <div v-else-if="widgets.length === 0" class="empty">
-      No widgets defined for this layer. Phase 7 admin will let operators add their own.
+      No widgets defined for this layer. Add some via Dashboard setup → Layer dashboards.
     </div>
     <!-- The previous "Select an instance/endpoint above to view its
          metrics" branches implied operator action was needed and

@@ -33,6 +33,7 @@ import { computed, ref, watch } from 'vue';
 import type { ZipkinSpan } from '@skywalking-horizon-ui/api-client';
 import { useZipkinTracePopout } from '@/layer/traces/useZipkinTracePopout';
 import { useZipkinTrace } from '@/layer/traces/useZipkinTraces';
+import { readAccent } from '@/utils/cssVar';
 
 const { openTraceId, closeTrace } = useZipkinTracePopout();
 const traceIdRef = computed(() => openTraceId.value);
@@ -129,15 +130,18 @@ function clearSpan(): void {
 watch(traceIdRef, () => { selectedSpanId.value = null; });
 
 // ── Color per service so each row reads as a band ────────────────
-const SERVICE_PALETTE = [
-  '#f97316', '#60a5fa', '#a78bfa', '#22d3ee',
-  '#f472b6', '#34d399', '#fbbf24', '#fb7185',
-];
+// First entry tracks `--sw-accent` so the brand color in the trace
+// waterfall follows the active theme. Rest stay constant for service
+// differentiation.
 function serviceColor(name: string | null | undefined): string {
   if (!name) return 'var(--sw-fg-3)';
+  const palette = [
+    readAccent('#f97316'), '#60a5fa', '#a78bfa', '#22d3ee',
+    '#f472b6', '#34d399', '#fbbf24', '#fb7185',
+  ];
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
-  return SERVICE_PALETTE[Math.abs(h) % SERVICE_PALETTE.length];
+  return palette[Math.abs(h) % palette.length]!;
 }
 
 // ── Formatting ────────────────────────────────────────────────────

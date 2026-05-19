@@ -58,14 +58,22 @@ const props = withDefaults(
   { limit: 10 },
 );
 
-const WINDOW_MS = 60 * 60_000;
+// Fallback window when the admin config hasn't loaded yet — matches
+// the alert page-setup bundled default so the first paint reads the
+// same window as the admin's saved value once it lands.
+const FALLBACK_WINDOW_MS = 20 * 60_000;
 
 const { capabilities } = useOapInfo();
 const hasQueryAlarms = computed<boolean>(() => capabilities.value.queryAlarms);
 
 /* Shares the queryKey `['alarms/config']` with the page + admin
- * view so the per-poll fetch cap (`overviewAlarmsLimit`) stays in
- * sync without a separate roundtrip. */
+ * view so the per-poll fetch cap (`overviewAlarmsLimit`) AND the
+ * window (`defaultWindowMs`) stay in sync without a separate
+ * roundtrip. Previously this widget hardcoded a 60-minute window,
+ * which contradicted the alarms page + topbar badge using the
+ * admin's `defaultWindowMs` (default 20m). Unified now: all three
+ * surfaces query the same window per the operator-configured value
+ * in `/admin/alert-page-setup`. */
 const cfgQuery = useQuery({
   queryKey: ['alarms/config'],
   queryFn: (): Promise<AlarmsConfig> => bff.alarms.config(),
@@ -73,6 +81,9 @@ const cfgQuery = useQuery({
 });
 const fetchLimit = computed<number>(
   () => cfgQuery.data.value?.overviewAlarmsLimit ?? OVERVIEW_ALARMS_LIMIT_DEFAULT,
+);
+const windowMs = computed<number>(
+  () => cfgQuery.data.value?.defaultWindowMs ?? FALLBACK_WINDOW_MS,
 );
 
 const alarmsQuery = useQuery({
@@ -85,10 +96,11 @@ const alarmsQuery = useQuery({
     hasQueryAlarms.value,
     hasQueryAlarms.value ? props.layer ?? '' : 'all',
     fetchLimit.value,
+    windowMs.value,
   ]),
   queryFn: () => {
     const end = Date.now();
-    const start = end - WINDOW_MS;
+    const start = end - windowMs.value;
     return bff.alarms.list({
       startTime: start,
       endTime: end,

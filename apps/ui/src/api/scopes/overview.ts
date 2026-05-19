@@ -64,13 +64,8 @@ export class OverviewApi {
       `/api/admin/overview-templates/${encodeURIComponent(id)}`,
     );
   }
-  adminSave(id: string, body: OverviewDashboard): Promise<{ ok: true; id: string }> {
-    return this.bff.request<{ ok: true; id: string }>(
-      'POST',
-      `/api/admin/overview-templates/${encodeURIComponent(id)}`,
-      body,
-    );
-  }
+  // adminSave removed — OverviewTemplatesAdmin now saves via
+  // `bff.templateSync.save('horizon.overview.<id>', content)`.
   adminCreate(body: OverviewDashboard): Promise<{ ok: true; id: string }> {
     return this.bff.request<{ ok: true; id: string }>(
       'POST',

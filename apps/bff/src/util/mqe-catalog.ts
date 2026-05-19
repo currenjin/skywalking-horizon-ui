@@ -30,8 +30,8 @@
  *
  * Returns `null` when no mapping exists for the (metric, layer) pair —
  * the BFF then surfaces a `null` value cell and the UI renders an
- * em-dash. Operators can extend the catalog via the Phase 7 admin
- * surface; for now we ship a conservative built-in set.
+ * em-dash. The built-in set below is the conservative ship default;
+ * operators can extend it via the Dashboard setup admin pages.
  */
 
 import type { LandingColumn } from '@skywalking-horizon-ui/api-client';
@@ -94,8 +94,8 @@ const BROWSER_SERVICE: Record<string, string> = {
 /**
  * Database virtual-service metrics (`virtual_database`). MQ + native
  * database (mysql/postgresql/…) layers have richer per-tech catalogs in
- * OAP — we ship the lowest common denominator here and let admin
- * override land in Phase 7.
+ * OAP — we ship the lowest common denominator here; operators
+ * override per deployment through Dashboard setup → Layer dashboards.
  */
 const DATABASE_SERVICE: Record<string, string> = {
   cpm: 'avg(service_cpm)',

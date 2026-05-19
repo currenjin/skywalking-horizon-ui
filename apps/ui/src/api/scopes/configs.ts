@@ -20,7 +20,7 @@ import type {
   OverviewDashboard,
 } from '@skywalking-horizon-ui/api-client';
 import { pushEvent } from '@/controls/eventLog';
-import type { BffClient } from '../client';
+import { withBase, type BffClient } from '../client';
 
 export type BundleScopeMap = Partial<
   Record<'service' | 'instance' | 'endpoint', DashboardWidget[]>
@@ -91,7 +91,7 @@ export class ConfigsApi {
     // still lands in the debug event log.
     let res: Response;
     try {
-      res = await fetch('/api/configs/bundle', {
+      res = await fetch(withBase('/api/configs/bundle'), {
         method: 'GET',
         credentials: 'include',
         headers,

@@ -77,7 +77,7 @@ session:
 
 ### 5. Open the UI
 
-Browse to `http://<bff-host>:8081/`. Log in with the user you created. The first thing to check is the **Cluster Status** page (`/admin/cluster`):
+Browse to `http://<bff-host>:8081/`. Log in with the user you created. The first thing to check is the **Cluster Status** page (`/operate/cluster`):
 
 - Query pane should be green — version, timezone, health score visible.
 - Admin pane should be green if you set `SW_ADMIN_SERVER=default` and the rest of the selectors on OAP.

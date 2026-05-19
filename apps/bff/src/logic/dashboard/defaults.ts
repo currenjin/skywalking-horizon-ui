@@ -19,8 +19,9 @@
  * Default dashboard widget sets per OAP layer enum. These are lifted
  * verbatim from the booster-ui templates the operator already knows —
  * see `docs/design/research/booster-templates/<layer>/<layer>-service.json`
- * for the source rows. Phase 7 admin will let operators edit + persist
- * their own set; until then the BFF serves these defaults.
+ * for the source rows. Operators can edit + persist their own set via
+ * the admin pages under Dashboard setup; this file is the seed the
+ * BFF falls back to when OAP holds no overriding template.
  *
  * 24-column grid: matches booster-ui's vue-grid-layout dimensions so
  * positions and spans port without rework.

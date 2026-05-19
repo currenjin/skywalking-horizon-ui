@@ -273,8 +273,9 @@ function prettyLayer(k: string): string {
         </header>
         <div class="aps__win">
           <p class="aps__win-lede">
-            Initial time range for the topbar alarm badge AND the alarms page's first load.
-            The overview "Active alarms" widget keeps its own fixed 60-minute window.
+            Time window applied to all three alarm surfaces — the topbar alarm badge, the
+            alarms page's first load, and the overview "Active alarms" widget. Unified
+            here so the counts reconcile across pages.
           </p>
           <div class="aps__win-options">
             <label

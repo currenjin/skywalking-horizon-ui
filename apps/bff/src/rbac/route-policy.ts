@@ -144,7 +144,8 @@ export const ROUTE_POLICY: Record<string, RoutePolicy> = {
   'GET /api/overview/dashboards':                  'overview:read',
   'GET /api/overview/dashboards/:id':              'overview:read',
   'GET /api/admin/layer-templates':                'dashboard:read',
-  'POST /api/admin/layer-templates/:key':          'dashboard:write',
+  // POST /api/admin/layer-templates/:key removed — updates go through
+  // `/api/admin/templates/save` (OAP-backed). See template-sync.ts.
 
   // ── DSL / OAL / MQE rules (admin operate) ────────────────────────
   'GET /api/rule':                                 'rule:read',
@@ -184,7 +185,9 @@ export const ROUTE_POLICY: Record<string, RoutePolicy> = {
   'GET /api/admin/overview-templates':             'overview:read',
   'GET /api/admin/overview-templates/:id':         'overview:read',
   'POST /api/admin/overview-templates':            'overview:write',
-  'POST /api/admin/overview-templates/:id':        'overview:write',
+  // POST /api/admin/overview-templates/:id removed — operator updates
+  // now go through `/api/admin/templates/save` (OAP-backed). Bundled
+  // JSON is immutable at runtime.
   'DELETE /api/admin/overview-templates/:id':      'overview:write',
 
   // ── Template sync (admin) — OAP UI-template REST overlay ─────────

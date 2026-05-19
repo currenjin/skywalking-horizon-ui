@@ -1,6 +1,6 @@
 # Cluster Status Check Sequence
 
-The Cluster Status page (`/admin/cluster`, sidebar **Operate → Cluster**) is the operator's single pane for "is the OAP backend healthy and configured correctly?" It runs **two independent checks in parallel** against the two OAP ports — they do not block each other, and the page surfaces each pane's result independently.
+The Cluster Status page (`/operate/cluster`, sidebar **Operate → Cluster**) is the operator's single pane for "is the OAP backend healthy and configured correctly?" It runs **two independent checks in parallel** against the two OAP ports — they do not block each other, and the page surfaces each pane's result independently.
 
 This page is intentionally two-pane: a healthy `:12800` with broken `:17128` is a real and recoverable state (forgot to expose the admin port behind a Kubernetes Service), and Horizon makes that diagnosis obvious.
 
@@ -101,14 +101,3 @@ The triage flow during "Horizon shows banners I don't understand":
 3. **Is the health score `> 0`?** OAP is up but degraded — pull `details` from `checkHealth` (visible in the Query pane) and triage on the OAP side.
 4. **Cluster member count off?** Either DNS / Service config is wrong, or one OAP node is down — check `/status/cluster/nodes` output and your OAP cluster controller.
 
-## Planned (Phase 6 / 7)
-
-The page documents upcoming additions in an inline strip:
-
-- **Per-node module activity matrix** — module × provider × node active/inactive grid (currently the dump is consumed cluster-wide; per-node breakdown requires a per-node admin call).
-- **Storage backend health** — BanyanDB / Elasticsearch / JDBC connection pool, index lag, throughput.
-- **Receiver activity** — gRPC / HTTP / Kafka / OTLP throughput, queue depth.
-- **Effective configuration tree** — two-node diff of merged config (advanced troubleshooting).
-- **TTL & retention grid** — hot / warm / cold storage timeline per metric scope.
-
-These are not implemented today. The placeholder on the page lists them so the operator knows what is and is not surfaced.

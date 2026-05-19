@@ -41,6 +41,7 @@ import {
   TooltipComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
+import { readAccent } from '@/utils/cssVar';
 import type { EChartsType } from 'echarts/core';
 import type { AlarmMessage } from '@/api/client';
 
@@ -142,7 +143,7 @@ function buildOption(): echarts.EChartsCoreOption {
         const recovered = b?.recovered ?? 0;
         const total = firing + recovered;
         return [
-          `<div style="font-weight:600;color:#f97316;">${formatMinute(ts)}</div>`,
+          `<div style="font-weight:600;color:${readAccent()};">${formatMinute(ts)}</div>`,
           `<div style="margin-top:4px;font-size:11px;color:var(--sw-fg-0);">${total} event${total === 1 ? '' : 's'}</div>`,
           total > 0
             ? `<div style="margin-top:2px;font-size:10.5px;">

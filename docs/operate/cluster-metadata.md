@@ -1,6 +1,6 @@
 # Cluster Status & Metadata
 
-Path: `/admin/cluster`. Verb: `cluster:read` (granted by maintainer, operator, admin).
+Path: `/operate/cluster`. Verb: `cluster:read` (granted by maintainer, operator, admin).
 
 This is the operator's single pane for "is the OAP backend wired correctly?". It surfaces:
 

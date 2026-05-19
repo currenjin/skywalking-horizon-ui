@@ -14,9 +14,9 @@ rbac:
     admin:      ["*"]
   landingByRole:
     viewer: /
-    maintainer: /admin/cluster
+    maintainer: /operate/cluster
     operator: /
-    admin: /admin/cluster
+    admin: /operate/cluster
 ```
 
 ## Fields
@@ -56,9 +56,9 @@ Default:
 ```yaml
 landingByRole:
   viewer: /
-  maintainer: /admin/cluster
+  maintainer: /operate/cluster
   operator: /
-  admin: /admin/cluster
+  admin: /operate/cluster
 ```
 
 The login flow returns this route as `landingRoute` in the login response. The UI router uses it as the post-login destination unless a `?redirect=` query param overrides (e.g., the user was bounced to login from a protected route — they return there after auth).

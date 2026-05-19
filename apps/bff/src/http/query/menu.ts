@@ -117,7 +117,8 @@ interface MenuRaw {
 /**
  * Horizon-side defaults for per-layer term aliases and color. OAP doesn't
  * expose these — they live alongside the UI's sidebar config. Operators can
- * override via `horizon.yaml.layers.<key>` (future Phase 7 admin).
+ * override via the Dashboard setup → Layer dashboards admin page,
+ * which writes to OAP via the UI-template sync surface.
  *
  * Keys match `Layer.name` in OAP's enum (UPPER_SNAKE_CASE).
  */

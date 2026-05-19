@@ -21,8 +21,9 @@
  * Definitions cribbed from booster-ui's widget configs in
  * `oap-server/.../ui-initialized-templates` — each upstream widget carries
  * `{name, title, tips}` per expression, which we collapse to one
- * `MetricMeta` per logical metric. Phase 7's admin UI lets operators
- * extend/override this catalog per deployment.
+ * `MetricMeta` per logical metric. Operators extend / override per
+ * deployment via the admin pages under Dashboard setup
+ * (`/admin/overview-templates`, `/admin/layer-dashboards`).
  *
  * ---------------------------------------------------------------------
  * Terminology standard

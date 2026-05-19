@@ -117,7 +117,7 @@ Read-only. To change roles, edit `rbac.roles` in `horizon.yaml`; hot-reload appl
 
 | Page | Verb | Default role(s) granted |
 |---|---|---|
-| `/admin/cluster` | `cluster:read` | maintainer, operator, admin |
+| `/operate/cluster` | `cluster:read` | maintainer, operator, admin |
 | `/admin/auth-status` | `auth:read` | (none built-in; assign explicitly) |
 | `/admin/users` | `user:read` | (none built-in; assign explicitly) |
 | `/admin/roles` | `role:read` | (none built-in; assign explicitly) |

@@ -29,11 +29,6 @@ export class LayerTemplatesApi {
     );
   }
 
-  save(template: AdminLayerTemplate): Promise<{ template: AdminLayerTemplate }> {
-    return this.bff.request<{ template: AdminLayerTemplate }>(
-      'POST',
-      `/api/admin/layer-templates/${encodeURIComponent(template.key)}`,
-      template,
-    );
-  }
+  // save() removed — LayerDashboardsAdmin now saves via
+  // `bff.templateSync.save('horizon.layer.<KEY>', content)`.
 }
