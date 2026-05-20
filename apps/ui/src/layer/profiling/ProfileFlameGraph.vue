@@ -223,7 +223,6 @@ const hoveredPctRoot = computed<string>(() => {
 const TIP_W = 380;
 const TIP_H = 160;
 const tipStyle = computed<Record<string, string>>(() => {
-  if (typeof window === 'undefined') return {};
   const offset = 14;
   let x = tipPos.x + offset;
   let y = tipPos.y + offset;
