@@ -407,6 +407,27 @@ function widgetColor(w: { id?: string; title?: string; expressions?: string[] })
   return colorForMetric(w.id || w.title || w.expressions?.[0] || '');
 }
 
+// Pop-out wiring for top / record widgets. The TopList renders inside the
+// widget body; its pop-out trigger lives in the widget's title bar (so it
+// can't overlap the in-widget tab row). We hold a per-widget ref to the
+// active TopList instance and call its exposed `openExpanded()`.
+type TopListExposed = { openExpanded: () => void };
+const topListRefs = new Map<string, TopListExposed>();
+function setTopListRef(id: string, el: unknown): void {
+  if (el) topListRefs.set(id, el as TopListExposed);
+  else topListRefs.delete(id);
+}
+function popOutTopList(id: string): void {
+  topListRefs.get(id)?.openExpanded();
+}
+function hasTopData(w: { id: string; type: string }): boolean {
+  const r = resultsById.value.get(w.id);
+  if (!r) return false;
+  if (w.type === 'top') return !!(r.topGroups?.length || r.topList?.length);
+  if (w.type === 'record') return !!r.records?.length;
+  return false;
+}
+
 /**
  * Evaluate a widget's `visibleWhen` predicate.
  *   - `<metric_name> has value`  → the widget's result has a non-null
@@ -655,7 +676,17 @@ function isVisible(
       >
         <div class="w-head" :title="w.tip">
           <h4>{{ w.title }}</h4>
-          <span v-if="w.unit" class="unit">{{ w.unit }}</span>
+          <div class="w-head-right">
+            <span v-if="w.unit" class="unit">{{ w.unit }}</span>
+            <button
+              v-if="(w.type === 'top' || w.type === 'record') && hasTopData(w)"
+              type="button"
+              class="w-popout"
+              title="Pop out — full list"
+              aria-label="Pop out full list"
+              @click="popOutTopList(w.id)"
+            >⤢</button>
+          </div>
         </div>
         <div class="w-body" :class="`type-${w.type}`">
           <template v-if="resultsById.get(w.id)?.error">
@@ -685,6 +716,7 @@ function isVisible(
           <template v-else-if="w.type === 'top'">
             <TopList
               v-if="resultsById.get(w.id)?.topGroups?.length"
+              :ref="(el) => setTopListRef(w.id, el)"
               :groups="resultsById.get(w.id)!.topGroups!"
               :unit="w.unit"
               :color="widgetColor(w)"
@@ -692,6 +724,7 @@ function isVisible(
             />
             <TopList
               v-else-if="resultsById.get(w.id)?.topList?.length"
+              :ref="(el) => setTopListRef(w.id, el)"
               :items="resultsById.get(w.id)!.topList!"
               :unit="w.unit"
               :color="widgetColor(w)"
@@ -705,6 +738,7 @@ function isVisible(
                  Future runtime work will add trace-id drill-in. -->
             <TopList
               v-if="resultsById.get(w.id)?.records?.length"
+              :ref="(el) => setTopListRef(w.id, el)"
               :items="resultsById.get(w.id)!.records!.map((r) => ({ name: r.name, value: r.value ?? null }))"
               :unit="w.unit"
               :color="widgetColor(w)"
@@ -1034,10 +1068,35 @@ function isVisible(
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.w-head-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
 .w-head .unit {
   font-size: 10.5px;
   color: var(--sw-fg-3);
   flex: 0 0 auto;
+}
+/* Pop-out trigger for top / record widgets — lives in the title bar so it
+ * never overlaps the in-widget tab row. */
+.w-popout {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--sw-fg-3);
+  background: transparent;
+  border: 1px solid var(--sw-line);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.w-popout:hover {
+  color: var(--sw-fg-0);
+  border-color: var(--sw-line-2);
 }
 .w-body {
   /* Column-flex so charts / lists / records can flex: 1 and claim the

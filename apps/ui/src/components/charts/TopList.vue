@@ -103,6 +103,10 @@ function onKeydown(e: KeyboardEvent): void {
 }
 onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 
+// The pop-out trigger lives in the host widget's title bar (so it can't
+// overlap the in-widget tab row); the host calls this via a template ref.
+defineExpose({ openExpanded });
+
 // Full-name hover tooltip. Row names are ellipsized to fit the widget,
 // so long api / endpoint / instance names are unreadable inline. A
 // teleported floating box (rendered to <body>, not inside the widget)
@@ -133,14 +137,6 @@ const tipStyle = computed(() => {
 
 <template>
   <div class="top-list">
-    <button
-      v-if="activeItems.length"
-      type="button"
-      class="tl-expand"
-      title="Pop out — full list"
-      aria-label="Pop out"
-      @click="openExpanded"
-    >⤢</button>
     <div v-if="showTabs" class="tabs">
       <button
         v-for="(g, i) in effectiveGroups"
@@ -226,33 +222,6 @@ const tipStyle = computed(() => {
   width: 100%;
   height: 100%;
   min-height: 0;
-}
-/* Pop-out affordance — top-right, surfaces on widget hover so it
- * doesn't clutter the dense default view. */
-.tl-expand {
-  position: absolute;
-  top: 0;
-  right: 0;
-  z-index: 2;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  font-size: 13px;
-  line-height: 1;
-  color: var(--sw-fg-3);
-  background: var(--sw-bg-1);
-  border: 1px solid var(--sw-line);
-  border-radius: 4px;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s, color 0.12s;
-}
-.top-list:hover .tl-expand {
-  opacity: 1;
-}
-.tl-expand:hover {
-  color: var(--sw-fg-0);
-  border-color: var(--sw-line-2);
 }
 .tabs {
   display: flex;
