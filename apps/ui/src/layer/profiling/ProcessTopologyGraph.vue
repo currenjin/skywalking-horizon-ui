@@ -37,7 +37,9 @@ import * as d3 from 'd3';
 import type { ProcessCall, ProcessNode } from '@/api/client';
 
 interface Pt { x: number; y: number }
-type PositionedNode = ProcessNode & Pt;
+// `_below` (inside cells only): label sits below the cell (bottom row)
+// vs above (upper rows), so a tight cluster's labels don't collide.
+type PositionedNode = ProcessNode & Pt & { _below?: boolean };
 interface PositionedCall {
   id: string;
   source: PositionedNode;
@@ -53,32 +55,6 @@ const host = ref<HTMLDivElement | null>(null);
 const selectedCallId = ref<string | null>(null);
 
 // ── Hex geometry (flat-top) ─────────────────────────────────────────
-const SQRT3 = Math.sqrt(3);
-/** Flat-top axial → pixel. Neighbour centres land √3·r apart, so a cell
- *  hexagon of radius r tiles (touches) its neighbours — a honeycomb. */
-function axialToPixel(ax: number, ay: number, r: number, o: Pt): Pt {
-  return { x: 1.5 * ax * r + o.x, y: ((SQRT3 / 2) * ax + SQRT3 * ay) * r + o.y };
-}
-/** Axial coords in spiral order from the centre — packs a compact
- *  honeycomb cluster (centre cell, then rings around it). */
-function spiralHex(n: number): Array<{ x: number; y: number }> {
-  const dirs = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
-  const out = [{ x: 0, y: 0 }];
-  let k = 1;
-  while (out.length < n) {
-    let cx = dirs[4][0] * k;
-    let cy = dirs[4][1] * k;
-    for (let side = 0; side < 6 && out.length < n + 6; side++) {
-      for (let step = 0; step < k; step++) {
-        out.push({ x: cx, y: cy });
-        cx += dirs[side][0];
-        cy += dirs[side][1];
-      }
-    }
-    k++;
-  }
-  return out.slice(0, n);
-}
 function hexCellPath(cx: number, cy: number, R: number): string {
   const v: [number, number][] = [];
   for (let i = 0; i < 6; i++) {
@@ -100,35 +76,49 @@ function protocolOf(c: ProcessCall): string {
 }
 
 let cellRadius = 26;
+let cellDraw = 20;
 let positioned: PositionedNode[] = [];
 
-function layout(o: Pt, w: number, h: number): PositionedNode[] {
+function layout(o: Pt): PositionedNode[] {
   const inside = props.nodes.filter(isInside).map((n) => ({ ...n }) as PositionedNode);
   const outside = props.nodes.filter((n) => !isInside(n)).map((n) => ({ ...n }) as PositionedNode);
 
-  // Inside processes: a compact honeycomb cluster (cells touch), packed
-  // spiral-from-centre. Cell size scales down as the cluster grows.
+  // Inside processes: a centred honeycomb pyramid — the partial row sits
+  // on TOP, full rows below, so the BOTTOM row's cells share one y (the
+  // ui-18 trefoil for 3 nodes: one on top, two level below). `cellRadius`
+  // is the spacing; `cellDraw` is the smaller rendered hexagon so cells
+  // keep a clear gap.
   const n = inside.length;
-  const rings = Math.max(1, Math.ceil((-3 + Math.sqrt(9 + 12 * Math.max(1, n - 1))) / 6));
-  cellRadius = Math.max(26, Math.min(50, 130 / (rings + 0.5)));
-  const cells = spiralHex(n);
-  inside.forEach((node, i) => {
-    const c = cells[i] ?? { x: 0, y: 0 };
-    const p = axialToPixel(c.x, c.y, cellRadius, o);
-    node.x = p.x;
-    node.y = p.y;
-  });
+  const cols = Math.max(1, Math.ceil(Math.sqrt(n)));
+  const rows = Math.max(1, Math.ceil(n / cols));
+  cellRadius = Math.max(24, Math.min(40, 120 / (rows + 1.2)));
+  cellDraw = cellRadius * 0.85;
+  const dx = cellRadius * 1.95;
+  const dy = cellRadius * 1.7;
+  const topCount = n - cols * (rows - 1); // cells in the (partial) top row
+  let idx = 0;
+  for (let r = 0; r < rows; r++) {
+    const count = r === 0 ? topCount : cols;
+    for (let c = 0; c < count; c++) {
+      const node = inside[idx++];
+      node.x = o.x + (c - (count - 1) / 2) * dx;
+      node.y = o.y + (r - (rows - 1) / 2) * dy;
+      node._below = r === rows - 1;
+    }
+  }
 
-  // External peers spread on a canvas-filling ellipse (skipping the
-  // bottom arc so the pod label stays clear), so the graph uses the
-  // whole widget instead of clustering near the centre.
+  // External peers ring the pod CLOSE to its boundary (not flung to the
+  // canvas corners), across the left / top / right, leaving the bottom
+  // arc (~90° in SVG coords, +y down) clear for the pod label. Radius
+  // grows a little with peer count so a busy pod doesn't crowd.
   positioned = [...inside, ...outside];
   const b = insideBoundary();
-  const rx = Math.max(w / 2 - 64, b.r + 130);
-  const ry = Math.max(h / 2 - 52, b.r + 96);
   const k = outside.length;
-  const START_DEG = 305;
-  const SPAN_DEG = 290; // leaves ~70° gap at the bottom
+  const pad = 130 + Math.max(0, k - 8) * 6;
+  const rx = b.r + pad;
+  const ry = b.r + pad * 0.82;
+  const START_DEG = 120; // just past bottom-left, sweep CCW-of-screen
+  const SPAN_DEG = 300; // 120→180→270→0→60, skipping 60–120 (bottom)
   outside.forEach((node, i) => {
     const t = k <= 1 ? 0.5 : i / (k - 1);
     const rad = (((START_DEG + t * SPAN_DEG) % 360) * Math.PI) / 180;
@@ -251,7 +241,7 @@ function render(): void {
   const h = rect.height || 520;
   const o: Pt = { x: 0, y: 0 };
 
-  positioned = layout(o, w, h);
+  positioned = layout(o);
   const byId = new Map(positioned.map((n) => [n.id, n]));
   const calls = buildCalls(byId);
 
@@ -389,19 +379,17 @@ function render(): void {
     );
   nodeSel
     .append('path')
-    .attr('d', (d) => hexCellPath(0, 0, isInside(d) ? cellRadius * 0.92 : 18))
+    .attr('d', (d) => hexCellPath(0, 0, isInside(d) ? cellDraw : 18))
     .attr('fill', (d) => (isInside(d) ? 'var(--sw-accent, #f97316)' : 'var(--sw-bg-3, #2a2d36)'))
     .attr('fill-opacity', (d) => (isInside(d) ? 0.85 : 0.75))
     .attr('stroke', 'var(--sw-bg-0, #0d0f14)')
     .attr('stroke-width', 1.5);
-  // Inside cells touch, so their labels alternate BELOW / ABOVE the
-  // honeycomb by index (cell 0 below, cell 1 above, cell 2 below, …) to
-  // avoid colliding with neighbours. External peers always label below
-  // their (isolated) cell. `positioned` is [inside…, outside…] so the
-  // datum index `i` is the inside index for inside cells.
-  function labelY(d: PositionedNode, i: number): number {
+  // Labels: bottom-row inside cells label BELOW, upper-row cells ABOVE
+  // (so the two level bottom cells read together and nothing collides).
+  // External peers always label below their isolated cell.
+  function labelY(d: PositionedNode): number {
     if (!isInside(d)) return 30;
-    return i % 2 === 1 ? -(cellRadius + 8) : cellRadius + 16;
+    return d._below ? cellDraw + 15 : -(cellDraw + 7);
   }
   nodeSel
     .append('text')

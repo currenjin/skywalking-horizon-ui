@@ -21,10 +21,10 @@
   process-level topology snapshot.
 
     ┌──────────────┬─────────────────────────────────────────────┐
-    │  Instance    │ Topology window selector  · Keep-alive btn  │
+    │  Instance    │ Topology window selector + refresh          │
     │  picker      ├─────────────────────────────────────────────┤
     │  Tasks list  │                                             │
-    │  + New Task  │   ProcessTopologyGraph (d3 force layout)    │
+    │  + New Task  │   ProcessTopologyGraph (honeycomb layout)   │
     │              │                                             │
     │              ├─────────────────────────────────────────────┤
     │              │  Selected node / call detail panel          │
@@ -72,7 +72,6 @@ const tasks = ref<EBPFTask[]>([]);
 const tasksError = ref<string | null>(null);
 const tasksLoading = ref(false);
 const currentTask = ref<EBPFTask | null>(null);
-const aliveStatus = ref<boolean | null>(null);
 
 watch(
   () => layerKey.value + '|' + (serviceId.value ?? '') + '|' + (selectedInstanceId.value ?? ''),
@@ -225,26 +224,31 @@ const targetProcessName = computed(
   () => (selectedCall.value && nodeById(selectedCall.value.target)?.name) || '—',
 );
 
-/** Edge-chart x-axis labels as elapsed `mm:ss` across the profiling
- *  window — compact and meaningful regardless of how long the task ran
- *  (relative `-Nm` markers blow up for multi-hour tasks). Derived from
- *  the metric series length + the task's run window. */
+/** Edge-chart x-axis labels = the ACTUAL profiling clock time per bucket
+ *  (task start → end), browser-local `HH:mm:ss`. Not relative `-Nm`
+ *  markers (which blow up for long tasks) — the operator reads the real
+ *  wall-clock span the task profiled. */
+const edgeTimeFmt = new Intl.DateTimeFormat(undefined, {
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
 const edgeXLabels = computed<string[]>(() => {
   const m = relationMetrics.value;
   const n = m?.client[0]?.values.length ?? m?.server[0]?.values.length ?? 0;
   if (n <= 0) return [];
   const task = currentTask.value;
+  const startMs =
+    task?.taskStartTime ?? Date.now() - windowMinutes.value * 60_000;
   const spanMs =
     task?.taskStartTime && task.fixedTriggerDuration
       ? task.fixedTriggerDuration * 1000
       : windowMinutes.value * 60_000;
   const stepMs = n > 1 ? spanMs / (n - 1) : spanMs;
-  return Array.from({ length: n }, (_, i) => {
-    const sec = Math.round((i * stepMs) / 1000);
-    const mm = Math.floor(sec / 60);
-    const ss = sec % 60;
-    return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
-  });
+  return Array.from({ length: n }, (_, i) =>
+    edgeTimeFmt.format(new Date(startMs + i * stepMs)),
+  );
 });
 
 function onEdgeKeydown(ev: KeyboardEvent): void {
@@ -252,17 +256,6 @@ function onEdgeKeydown(ev: KeyboardEvent): void {
 }
 onMounted(() => window.addEventListener('keydown', onEdgeKeydown));
 onBeforeUnmount(() => window.removeEventListener('keydown', onEdgeKeydown));
-
-async function keepAlive(): Promise<void> {
-  if (!currentTask.value) return;
-  aliveStatus.value = null;
-  try {
-    const resp = await bffClient.networkProfile.keepAlive(currentTask.value.taskId);
-    aliveStatus.value = resp.status;
-  } catch {
-    aliveStatus.value = false;
-  }
-}
 
 // ── New task modal ────────────────────────────────────────────────
 const showNewTask = ref(false);
@@ -388,14 +381,6 @@ function fmtTime(ms: number): string {
             <option :value="180">3 hr</option>
           </select>
         </div>
-        <button
-          class="btn-secondary"
-          :disabled="!currentTask"
-          @click="keepAlive"
-        >Keep-alive ping</button>
-        <span v-if="aliveStatus !== null" :class="['alive', aliveStatus ? 'ok' : 'err']">
-          {{ aliveStatus ? 'Sent ✓' : 'OAP rejected' }}
-        </span>
         <span class="spacer"></span>
         <span class="muted" v-if="!topologyLoading">{{ nodes.length }} processes · {{ calls.length }} edges</span>
         <span v-if="topologyLoading" class="muted">loading topology…</span>
@@ -713,17 +698,6 @@ function fmtTime(ms: number): string {
 .btn-secondary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-.alive {
-  font-size: 10.5px;
-  padding: 0 6px;
-  border-radius: 2px;
-}
-.alive.ok {
-  color: var(--sw-accent);
-}
-.alive.err {
-  color: var(--sw-err);
 }
 .spacer {
   flex: 1 1 0;
