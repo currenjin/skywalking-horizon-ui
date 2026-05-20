@@ -37,10 +37,7 @@ import * as d3 from 'd3';
 import type { ProcessCall, ProcessNode } from '@/api/client';
 
 interface Pt { x: number; y: number }
-// `_ox/_oy` = offset from the pod-boundary centre, stored for external
-// peers so they rigidly follow the boundary when it's recomputed during
-// an inside-node drag (they orbit the pod, never end up inside it).
-type PositionedNode = ProcessNode & Pt & { _ox?: number; _oy?: number };
+type PositionedNode = ProcessNode & Pt;
 interface PositionedCall {
   id: string;
   source: PositionedNode;
@@ -56,38 +53,6 @@ const host = ref<HTMLDivElement | null>(null);
 const selectedCallId = ref<string | null>(null);
 
 // ── Hex geometry (flat-top) ─────────────────────────────────────────
-const SQRT3 = Math.sqrt(3);
-function axialToPixel(ax: number, ay: number, r: number, o: Pt): Pt {
-  return { x: (1.5 * ax) * r + o.x, y: ((SQRT3 / 2) * ax + SQRT3 * ay) * r + o.y };
-}
-/** Axial coords in spiral order from the centre — fills a honeycomb. */
-function spiralHex(n: number): Array<{ x: number; y: number }> {
-  const dirs = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
-  const out = [{ x: 0, y: 0 }];
-  let k = 1;
-  while (out.length < n) {
-    let cx = dirs[4][0] * k;
-    let cy = dirs[4][1] * k;
-    for (let side = 0; side < 6 && out.length < n + 6; side++) {
-      for (let step = 0; step < k; step++) {
-        out.push({ x: cx, y: cy });
-        cx += dirs[side][0];
-        cy += dirs[side][1];
-      }
-    }
-    k++;
-  }
-  return out.slice(0, n);
-}
-function circlePoints(r: number, stepDeg: number, o: Pt): Pt[] {
-  const out: Pt[] = [];
-  for (let deg = 0; deg < 360; deg += stepDeg) {
-    if (deg >= 230 && deg <= 310) continue;
-    const rad = (Math.PI * 2 * deg) / 360;
-    out.push({ x: Math.cos(rad) * r + o.x, y: Math.sin(rad) * r + o.y });
-  }
-  return out;
-}
 function hexCellPath(cx: number, cy: number, R: number): string {
   const v: [number, number][] = [];
   for (let i = 0; i < 6; i++) {
@@ -111,52 +76,44 @@ function protocolOf(c: ProcessCall): string {
 let cellRadius = 26;
 let positioned: PositionedNode[] = [];
 
-function layout(o: Pt): PositionedNode[] {
+function layout(o: Pt, w: number, h: number): PositionedNode[] {
   const inside = props.nodes.filter(isInside).map((n) => ({ ...n }) as PositionedNode);
   const outside = props.nodes.filter((n) => !isInside(n)).map((n) => ({ ...n }) as PositionedNode);
 
-  // Inside honeycomb. Cell size scales down as the spiral grows so the
-  // packed cluster stays compact.
-  const rings = Math.max(1, Math.ceil((-3 + Math.sqrt(9 + 12 * Math.max(1, inside.length - 1))) / 6));
-  cellRadius = Math.max(16, Math.min(34, 150 / (rings + 0.6)));
-  const cells = spiralHex(inside.length);
-  inside.forEach((n, i) => {
-    const c = cells[i] ?? { x: 0, y: 0 };
-    const p = axialToPixel(c.x, c.y, cellRadius, o);
-    n.x = p.x;
-    n.y = p.y;
+  // Inside processes: centred LEFT-RIGHT rows (not an arc). Columns bias
+  // slightly wide so the block reads horizontally; the last row is
+  // centred on its own count.
+  const n = inside.length;
+  const cols = Math.max(1, Math.min(n, Math.ceil(Math.sqrt(n * 1.7))));
+  const rows = Math.max(1, Math.ceil(n / cols));
+  cellRadius = Math.max(16, Math.min(34, 240 / (Math.max(cols, rows) + 1)));
+  const dx = cellRadius * 1.95;
+  const dy = cellRadius * 2.0;
+  inside.forEach((node, i) => {
+    const r = Math.floor(i / cols);
+    const c = i % cols;
+    const rowCount = r < rows - 1 ? cols : n - cols * (rows - 1);
+    node.x = o.x + (c - (rowCount - 1) / 2) * dx;
+    node.y = o.y + (r - (rows - 1) / 2) * dy;
   });
 
-  // Outside peers ring the (tight) inside cluster.
-  const startR = insideExtent(inside, o) + 90;
-  let r = startR;
-  let ring = circlePoints(r, 26, o);
-  outside.forEach((n, i) => {
-    if (!ring[i]) {
-      r += 80;
-      ring = [...ring, ...circlePoints(r, 26, o)];
-    }
-    const p = ring[i] ?? { x: o.x, y: o.y - r };
-    n.x = p.x;
-    n.y = p.y;
-  });
-
-  // Freeze each external peer's offset from the initial boundary centre
-  // so it follows the boundary when that's recomputed mid-drag.
+  // External peers spread on a canvas-filling ellipse (skipping the
+  // bottom arc so the pod label stays clear), so the graph uses the
+  // whole widget instead of clustering near the centre.
   positioned = [...inside, ...outside];
   const b = insideBoundary();
-  for (const n of outside) {
-    n._ox = n.x - b.cx;
-    n._oy = n.y - b.cy;
-  }
+  const rx = Math.max(w / 2 - 64, b.r + 130);
+  const ry = Math.max(h / 2 - 52, b.r + 96);
+  const k = outside.length;
+  const START_DEG = 305;
+  const SPAN_DEG = 290; // leaves ~70° gap at the bottom
+  outside.forEach((node, i) => {
+    const t = k <= 1 ? 0.5 : i / (k - 1);
+    const rad = (((START_DEG + t * SPAN_DEG) % 360) * Math.PI) / 180;
+    node.x = o.x + rx * Math.cos(rad);
+    node.y = o.y + ry * Math.sin(rad);
+  });
   return positioned;
-}
-
-/** Max distance from `o` to any inside cell centre. */
-function insideExtent(inside: PositionedNode[], o: Pt): number {
-  let r = 0;
-  for (const n of inside) r = Math.max(r, Math.hypot(n.x - o.x, n.y - o.y));
-  return r;
 }
 
 /** Smallest flat-top hexagon (centre + circumradius) that wraps the
@@ -245,13 +202,6 @@ function redrawBoundary(): void {
   const b = insideBoundary();
   boundarySel?.attr('d', hexCellPath(b.cx, b.cy, b.r));
   boundaryLabelSel?.attr('x', b.cx).attr('y', b.cy + b.r + 16);
-  // External peers ride the boundary centre so they keep orbiting the
-  // pod as inside cells are dragged around.
-  for (const n of positioned) {
-    if (isInside(n) || n._ox === undefined || n._oy === undefined) continue;
-    n.x = b.cx + n._ox;
-    n.y = b.cy + n._oy;
-  }
 }
 function refreshPositions(): void {
   edgeSel?.attr('d', edgePath);
@@ -271,7 +221,7 @@ function render(): void {
   const h = rect.height || 520;
   const o: Pt = { x: 0, y: 0 };
 
-  positioned = layout(o);
+  positioned = layout(o, w, h);
   const byId = new Map(positioned.map((n) => [n.id, n]));
   const calls = buildCalls(byId);
 
@@ -401,11 +351,10 @@ function render(): void {
         .on('drag', (ev, d) => {
           d.x = ev.x;
           d.y = ev.y;
-          // Dragging an inside cell reshapes the boundary, which in turn
-          // repositions the external peers — recompute that first, then
-          // flush all transforms in one pass.
-          if (isInside(d)) redrawBoundary();
           refreshPositions();
+          // Dragging an inside cell reshapes the pod boundary; external
+          // peers stay put (anchored to the canvas).
+          if (isInside(d)) redrawBoundary();
         }) as never,
     );
   nodeSel
@@ -422,7 +371,8 @@ function render(): void {
     .attr('text-anchor', 'middle')
     .attr('fill', 'var(--sw-fg-1, #d4d6dd)')
     .style('font-family', 'var(--sw-mono, monospace)')
-    .style('font-size', '13px')
+    .style('font-size', '16px')
+    .style('font-weight', '600')
     .text((d) => {
       const base = d.name.split('.')[0];
       return base.length > 14 ? `${base.slice(0, 14)}…` : base;

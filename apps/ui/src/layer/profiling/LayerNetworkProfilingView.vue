@@ -173,10 +173,21 @@ watch(selectedCall, async (call) => {
   }
   relationLoading.value = true;
   try {
+    // Query over the profiling task's own run window (the data only
+    // exists for that span), falling back to the topology window when
+    // no task is selected.
+    const task = currentTask.value;
+    const taskWindow =
+      task?.taskStartTime && task.fixedTriggerDuration
+        ? {
+            startTime: task.taskStartTime,
+            endTime: task.taskStartTime + task.fixedTriggerDuration * 1000,
+          }
+        : { windowMinutes: windowMinutes.value };
     relationMetrics.value = await bffClient.networkProfile.relationMetrics(layerKey.value, {
       source: endpointRef(src),
       dest: endpointRef(dst),
-      windowMinutes: windowMinutes.value,
+      ...taskWindow,
     });
     if (!relationMetrics.value.reachable && relationMetrics.value.error) {
       relationError.value = relationMetrics.value.error;
@@ -407,16 +418,18 @@ function fmtTime(ms: number): string {
           >
             <h5 class="edge-col-head" :class="side">{{ side === 'client' ? 'Client side' : 'Server side' }}</h5>
             <div v-if="!relationMetrics[side].length" class="muted sm">No {{ side }} metrics configured.</div>
-            <div v-for="m in relationMetrics[side]" :key="m.id" class="edge-widget sw-card">
-              <div class="ew-head">
-                <span class="ew-label">{{ m.label }}</span>
-                <span class="ew-val mono">{{ fmtMetric(latestValue(m.values), m.unit) }}</span>
+            <div v-else class="edge-col-grid">
+              <div v-for="m in relationMetrics[side]" :key="m.id" class="edge-widget sw-card">
+                <div class="ew-head">
+                  <span class="ew-label">{{ m.label }}</span>
+                  <span class="ew-val mono">{{ fmtMetric(latestValue(m.values), m.unit) }}</span>
+                </div>
+                <TimeChart
+                  :series="[{ label: m.label, data: m.values, unit: m.unit }]"
+                  :height="120"
+                  :unit="m.unit"
+                />
               </div>
-              <TimeChart
-                :series="[{ label: m.label, data: m.values, unit: m.unit }]"
-                :height="130"
-                :unit="m.unit"
-              />
             </div>
           </section>
         </div>
@@ -746,8 +759,9 @@ function fmtTime(ms: number): string {
   font-size: 10.5px;
   color: var(--sw-fg-1);
 }
-/* Edge dashboard modal — wide, client | server side-by-side. */
-.edge-dlg { width: 1320px; max-width: 96vw; max-height: 90vh; }
+/* Edge dashboard modal — wide; client | server side-by-side, each side
+   a 2-up widget grid → 4 widgets per row (2 client + 2 server). */
+.edge-dlg { width: 1600px; max-width: 96vw; max-height: 90vh; }
 .edge-dlg-title {
   display: flex;
   align-items: center;
@@ -773,6 +787,11 @@ function fmtTime(ms: number): string {
   align-items: start;
 }
 .edge-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.edge-col-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
 .edge-col-head {
   margin: 0;
   padding-bottom: 6px;

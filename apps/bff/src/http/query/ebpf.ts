@@ -543,6 +543,11 @@ export function registerEBPFRoutes(app: FastifyInstance, deps: EBPFRouteDeps): v
         | {
             source?: ProcessRelationEndpointRef;
             dest?: ProcessRelationEndpointRef;
+            /** Profiling-task window (ms epoch). Preferred — the metrics
+             *  only exist for the span the task actually ran. */
+            startTime?: number;
+            endTime?: number;
+            /** Fallback when no task window is supplied. */
             windowMinutes?: number;
           }
         | undefined;
@@ -555,16 +560,26 @@ export function registerEBPFRoutes(app: FastifyInstance, deps: EBPFRouteDeps): v
       }
 
       const cfg = processTopologyConfigFor(getLayerTemplate(params.key));
-      const minutes = Math.max(5, Math.min(180, Number(body?.windowMinutes) || 30));
-      const end = new Date();
-      const start = new Date(end.getTime() - minutes * 60_000);
+      // Prefer the profiling-task time range (the data only exists for
+      // that span). Fall back to a rolling window when none is given.
+      let startMs: number;
+      let endMs: number;
+      if (body?.startTime && body?.endTime && body.endTime > body.startTime) {
+        startMs = body.startTime;
+        endMs = body.endTime;
+      } else {
+        const minutes = Math.max(5, Math.min(180, Number(body?.windowMinutes) || 30));
+        endMs = Date.now();
+        startMs = endMs - minutes * 60_000;
+      }
       // Match the network-topology route's UTC formatting so the edge
       // metrics window lines up with the rendered graph window.
-      const fmt = (d: Date) => {
+      const fmt = (ms: number) => {
+        const d = new Date(ms);
         const z = (n: number) => String(n).padStart(2, '0');
         return `${d.getUTCFullYear()}-${z(d.getUTCMonth() + 1)}-${z(d.getUTCDate())} ${z(d.getUTCHours())}${z(d.getUTCMinutes())}`;
       };
-      const w = { start: fmt(start), end: fmt(end) };
+      const w = { start: fmt(startMs), end: fmt(endMs) };
 
       // Build one aliased execExpression per metric across both sides.
       const aliasMap = new Map<string, { side: 'client' | 'server'; metric: TopologyMetricDef }>();

@@ -75,6 +75,9 @@ export class NetworkProfileApi {
     body: {
       source: ProcessRelationEndpointRef;
       dest: ProcessRelationEndpointRef;
+      /** Profiling-task window (ms epoch); preferred over windowMinutes. */
+      startTime?: number;
+      endTime?: number;
       windowMinutes?: number;
     },
   ): Promise<ProcessRelationMetricsResponse> {
