@@ -676,12 +676,15 @@ function toggleNewTaskLabel(l: string): void {
                       <span v-for="l in p.labels" :key="l" class="pe-chip">{{ l }}</span>
                     </dd>
                   </div>
-                  <!-- Attributes flattened: each `name=value` is a
-                       first-level dl row, matching booster-ui's process
-                       detail card. Nesting them under an "Attributes"
-                       label added a hierarchy level for no payoff — the
-                       names (`host_ip`, `container.id`, `command_line`)
-                       already read as attributes. -->
+                  <!-- Attributes flattened to first-level dl rows.
+                       A thin "ATTRIBUTES" rule sits above the first one
+                       so operators read "these are OAP-reported process
+                       attributes" vs. the fixed identity rows above.
+                       The label is a divider hint, NOT a header — the
+                       rows themselves still live at the same level. -->
+                  <div v-if="(p.attributes ?? []).length" class="pe-sep">
+                    <span class="pe-sep-label">Attributes</span>
+                  </div>
                   <div v-for="a in p.attributes ?? []" :key="`attr-${a.name}`" class="pe-row">
                     <dt>{{ a.name }}</dt>
                     <dd class="mono">{{ a.value }}</dd>
@@ -1163,6 +1166,29 @@ function toggleNewTaskLabel(l: string): void {
   color: var(--sw-fg-1);
   margin: 0 4px 4px 0;
   font-size: 10.5px;
+}
+/* Separator between the fixed identity rows (Process / Service / …)
+ * and the OAP-reported attribute rows. A 1px dashed rule with a small
+ * uppercase "ATTRIBUTES" caption sitting on top — purely a visual
+ * divider; the attribute rows below it stay structurally at the same
+ * dl level so the grid alignment carries through. */
+.pe-sep {
+  margin: 6px 0 4px;
+  border-top: 1px dashed var(--sw-line);
+  position: relative;
+}
+.pe-sep-label {
+  position: relative;
+  top: -7px;
+  display: inline-block;
+  padding: 0 6px;
+  margin-left: 4px;
+  background: var(--sw-bg-2);
+  color: var(--sw-fg-3);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 /* Popout shell — teleported to <body>; Vue scoped CSS data-v-X attrs
  * still match because teleport preserves the component's attribute
