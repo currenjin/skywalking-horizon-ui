@@ -35,9 +35,11 @@ import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useLayerInstances } from '@/layer/useLayerInstances';
 import { useSelectedService } from '@/layer/useSelectedService';
+import { useLayers } from '@/shell/useLayers';
 import { bffClient } from '@/api/client';
 import type {
   EBPFTask,
+  LayerDef,
   NetworkProfilingSampling,
   ProcessCall,
   ProcessNode,
@@ -45,12 +47,16 @@ import type {
   ProcessRelationMetricsResponse,
 } from '@/api/client';
 import ProcessTopologyGraph from '@/layer/profiling/ProcessTopologyGraph.vue';
-import Sparkline from '@/components/charts/Sparkline.vue';
+import TimeChart from '@/components/charts/TimeChart.vue';
 import Icon from '@/components/icons/Icon.vue';
 
 const route = useRoute();
 const layerKey = computed(() => String(route.params.layerKey ?? ''));
 const { selectedId: serviceId } = useSelectedService();
+const { layers } = useLayers();
+const layer = computed<LayerDef | null>(
+  () => layers.value.find((l) => l.key === layerKey.value) ?? null,
+);
 
 // Instance picker (binds to ?serviceInstance= via plain ref state — the
 // network view needs an *instance* to be useful, so we don't reuse the
@@ -130,8 +136,15 @@ async function loadTopology(): Promise<void> {
   }
 }
 
-const selectedNode = ref<ProcessNode | null>(null);
+// Edge selection drives the dashboard modal. Node info is shown by the
+// graph's own floating popover, so the view only tracks the edge.
 const selectedCall = ref<ProcessCall | null>(null);
+function onSelectCall(c: ProcessCall | null): void {
+  selectedCall.value = c;
+}
+function closeEdge(): void {
+  selectedCall.value = null;
+}
 
 // ── Edge (process-relation) metrics ────────────────────────────────
 const relationMetrics = ref<ProcessRelationMetricsResponse | null>(null);
@@ -362,8 +375,8 @@ function fmtTime(ms: number): string {
           v-if="nodes.length"
           :nodes="nodes"
           :calls="calls"
-          @select-node="selectedNode = $event; selectedCall = null"
-          @select-call="selectedCall = $event; selectedNode = null"
+          :group-expression="layer?.processTopology?.groupExpression"
+          @select-call="onSelectCall"
         />
         <div v-else-if="!topologyLoading" class="topology-empty">
           {{ selectedInstanceId
@@ -371,54 +384,47 @@ function fmtTime(ms: number): string {
             : 'Pick an instance to view its process topology.' }}
         </div>
       </div>
+    </div>
+  </div>
 
-      <div v-if="selectedNode || selectedCall" class="detail">
-        <div v-if="selectedNode">
-          <h5>Process</h5>
-          <dl class="kv">
-            <dt>Name</dt><dd>{{ selectedNode.name }}</dd>
-            <dt>Real?</dt><dd>{{ selectedNode.isReal ? 'yes' : 'virtual peer' }}</dd>
-            <dt>Service</dt><dd>{{ selectedNode.serviceName }}</dd>
-            <dt>Instance</dt><dd>{{ selectedNode.serviceInstanceName }}</dd>
-            <dt>ID</dt><dd class="mono">{{ selectedNode.id }}</dd>
-          </dl>
+  <!-- Edge dashboard — a large modal showing the full process-relation
+       metric dashboard (client + server) for the clicked conversation. -->
+  <div v-if="selectedCall" class="dlg-mask" @click.self="closeEdge">
+    <div class="dlg edge-dlg">
+      <div class="dlg-head">
+        <div class="edge-dlg-title">
+          <span class="mono">{{ sourceProcessName }}</span>
+          <span class="muted">→</span>
+          <span class="mono">{{ targetProcessName }}</span>
+          <span v-if="selectedCall.detectPoints?.length" class="dp-chip">{{ selectedCall.detectPoints.join(' · ') }}</span>
         </div>
-        <div v-else-if="selectedCall">
-          <h5>Conversation</h5>
-          <div class="edge-pair">
-            <span class="mono">{{ sourceProcessName }}</span>
-            <span class="muted">→</span>
-            <span class="mono">{{ targetProcessName }}</span>
-          </div>
-          <dl class="kv">
-            <dt>Detect points</dt><dd>{{ selectedCall.detectPoints.join(', ') }}</dd>
-            <dt>Source comp.</dt><dd>{{ (selectedCall.sourceComponents ?? []).join(', ') || '—' }}</dd>
-            <dt>Target comp.</dt><dd>{{ (selectedCall.targetComponents ?? []).join(', ') || '—' }}</dd>
-          </dl>
-
-          <div class="edge-metrics">
-            <div v-if="relationLoading" class="muted sm">Reading process-relation metrics…</div>
-            <div v-else-if="relationError" class="banner err sm">{{ relationError }}</div>
-            <template v-else-if="relationMetrics">
-              <div
-                v-for="side in (['client', 'server'] as const)"
-                :key="side"
-                class="metric-side"
-              >
-                <div class="side-label">{{ side }} side</div>
-                <div
-                  v-for="m in relationMetrics[side]"
-                  :key="m.id"
-                  class="metric-row"
-                >
-                  <span class="m-label">{{ m.label }}</span>
-                  <Sparkline :values="m.values" :width="72" :height="16" />
-                  <span class="m-val mono">{{ fmtMetric(latestValue(m.values), m.unit) }}</span>
+        <button class="x" @click="closeEdge">×</button>
+      </div>
+      <div class="dlg-body edge-dlg-body">
+        <div v-if="relationLoading" class="muted">Reading process-relation metrics…</div>
+        <div v-else-if="relationError" class="banner err">{{ relationError }}</div>
+        <template v-else-if="relationMetrics">
+          <section
+            v-for="side in (['client', 'server'] as const)"
+            :key="side"
+            class="edge-side"
+          >
+            <h5 class="edge-side-head">{{ side }} side</h5>
+            <div class="edge-grid">
+              <div v-for="m in relationMetrics[side]" :key="m.id" class="edge-widget sw-card">
+                <div class="ew-head">
+                  <span class="ew-label">{{ m.label }}</span>
+                  <span class="ew-val mono">{{ fmtMetric(latestValue(m.values), m.unit) }}</span>
                 </div>
+                <TimeChart
+                  :series="[{ label: m.label, data: m.values, unit: m.unit }]"
+                  :height="120"
+                  :unit="m.unit"
+                />
               </div>
-            </template>
-          </div>
-        </div>
+            </div>
+          </section>
+        </template>
       </div>
     </div>
   </div>
@@ -745,41 +751,50 @@ function fmtTime(ms: number): string {
   font-size: 10.5px;
   color: var(--sw-fg-1);
 }
-.edge-pair {
+/* Edge dashboard modal — full process-relation widget grid. */
+.edge-dlg { width: 980px; max-width: 94vw; max-height: 88vh; }
+.edge-dlg-title {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
   font-size: 12px;
   color: var(--sw-fg-0);
 }
-.edge-pair .mono { font-family: var(--sw-mono); }
-.edge-metrics {
-  margin-top: 10px;
-  border-top: 1px dashed var(--sw-line);
-  padding-top: 8px;
+.edge-dlg-title .mono { font-family: var(--sw-mono); }
+.dp-chip {
+  font-size: 9.5px;
+  font-family: var(--sw-mono);
+  color: var(--sw-fg-2);
+  background: var(--sw-bg-2);
+  border: 1px solid var(--sw-line);
+  border-radius: 10px;
+  padding: 1px 8px;
 }
-.sm { font-size: 11px; }
-.metric-side { margin-bottom: 8px; }
-.side-label {
+.edge-dlg-body { overflow-y: auto; padding: 12px 14px; }
+.edge-side { margin-bottom: 14px; }
+.edge-side-head {
+  margin: 0 0 8px;
   font-size: 9.5px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--sw-fg-3);
+}
+.edge-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+.edge-widget { padding: 8px 10px; }
+.ew-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
   margin-bottom: 4px;
 }
-.metric-row {
-  display: grid;
-  grid-template-columns: 1fr 72px 96px;
-  align-items: center;
-  gap: 8px;
-  padding: 2px 0;
+.ew-label { font-size: 11px; color: var(--sw-fg-2); }
+.ew-val {
   font-size: 11px;
-}
-.metric-row .m-label { color: var(--sw-fg-2); }
-.metric-row .m-val {
-  text-align: right;
   color: var(--sw-fg-0);
   font-family: var(--sw-mono);
   font-variant-numeric: tabular-nums;

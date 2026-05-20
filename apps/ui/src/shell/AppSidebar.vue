@@ -410,7 +410,7 @@ watch(
                   class="sw-nav-item"
                   :class="{ 'is-active': isActive(`/layer/${L.key}/zipkin-trace`) }"
                 >
-                  <Icon name="trace" /><span>Zipkin Trace</span>
+                  <Icon name="trace" /><span>OTel &amp; Zipkin Trace</span>
                 </RouterLink>
                 <RouterLink
                   v-if="L.caps.logs"
@@ -549,7 +549,7 @@ watch(
             class="sw-nav-item"
             :class="{ 'is-active': isActive(`/layer/${E.layer.key}/zipkin-trace`) }"
           >
-            <Icon name="trace" /><span>Zipkin Traces</span>
+            <Icon name="trace" /><span>OTel &amp; Zipkin Traces</span>
           </RouterLink>
           <RouterLink
             v-if="E.layer.caps.logs"
