@@ -1669,7 +1669,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPageKeyDown, true)
               </dd>
               <dt>Instance</dt><dd class="mono">{{ openSpan.serviceInstanceName }}</dd>
               <dt>Endpoint</dt><dd class="mono">{{ openSpan.endpointName || '—' }}</dd>
-              <dt>Type</dt><dd><span class="tr-kind" :style="{ background: kindColor(openSpan.type) }">{{ openSpan.type }}</span></dd>
+              <dt>Type</dt><dd><span class="tr-kind" :style="{ color: kindColor(openSpan.type) }">{{ openSpan.type }}</span></dd>
               <dt>Component</dt><dd class="mono">{{ openSpan.component || '—' }}</dd>
               <dt>Peer</dt><dd class="mono">{{ openSpan.peer || '—' }}</dd>
               <dt>Layer</dt><dd class="mono dim">{{ openSpan.layer || '—' }}</dd>

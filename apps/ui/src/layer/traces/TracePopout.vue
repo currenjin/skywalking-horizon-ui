@@ -134,8 +134,9 @@ function serviceColor(c: string): string {
 }
 function kindColor(type: string | null | undefined): string {
   const t = (type ?? '').toUpperCase();
-  if (t.includes('SERVER')) return 'var(--sw-accent)';
-  if (t.includes('CLIENT')) return 'var(--sw-info)';
+  if (t.includes('SERVER') || t === 'ENTRY') return 'var(--sw-accent)';
+  if (t.includes('CLIENT') || t === 'EXIT') return 'var(--sw-info)';
+  if (t === 'LOCAL') return 'var(--sw-purple)';
   if (t.includes('PRODUCER') || t.includes('CONSUMER')) return 'var(--sw-purple)';
   if (t.includes('DATABASE') || t.includes('SQL') || t.includes('CACHE')) return 'var(--sw-cyan)';
   return 'var(--sw-fg-2)';
@@ -334,7 +335,7 @@ function nativeSpanError(s: NativeSpan): boolean { return s.isError; }
                   </dd>
                   <dt>Instance</dt><dd class="mono wba">{{ selectedSpan.serviceInstanceName }}</dd>
                   <dt>Endpoint</dt><dd class="mono wba">{{ selectedSpan.endpointName || '—' }}</dd>
-                  <dt>Type</dt><dd><span class="tp-kind" :style="{ background: kindColor(selectedSpan.type) }">{{ selectedSpan.type }}</span></dd>
+                  <dt>Type</dt><dd><span class="tp-kind" :style="{ color: kindColor(selectedSpan.type) }">{{ selectedSpan.type }}</span></dd>
                   <dt>Component</dt><dd class="mono">{{ selectedSpan.component || '—' }}</dd>
                   <dt>Peer</dt><dd class="mono wba">{{ selectedSpan.peer || '—' }}</dd>
                   <dt>Layer</dt><dd class="mono dim">{{ selectedSpan.layer || '—' }}</dd>
