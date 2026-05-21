@@ -16,16 +16,21 @@
  */
 
 /**
- * Tiny per-process cache for the trace-protocol probe.
+ * Tiny per-process cache for the native trace-query-API probe.
  *
- * OAP 9.6+ exposes `queryTraces` (v2) which returns the list AND
- * the spans inline in a single roundtrip. Older OAP only exposes
- * `queryBasicTraces` (v3) which returns trace summaries; the SPA
- * fetches each detail via `queryTrace(traceId)`.
+ * OAP exposes two native trace queries. The Trace Query v2 API
+ * (`queryTraces`) returns the list AND the spans inline in a single
+ * roundtrip — but OAP only supports it on the BanyanDB storage
+ * backend. On every other backend (Elasticsearch, …) it is
+ * unavailable, so the BFF uses the Trace Query v1 API
+ * (`queryBasicTraces`), which returns trace/segment summaries; the SPA
+ * then fetches each detail via `queryTrace(traceId)`.
  *
- * The v2 query type carries a sibling boolean `hasQueryTracesV2Support`
- * we can probe once and cache. Cached for 5 minutes so an OAP rollover
- * or a redeploy is picked up without an explicit reload.
+ * OAP advertises v2 support through the sibling boolean
+ * `hasQueryTracesV2Support` (true iff the storage backend is
+ * BanyanDB), which we probe once and cache for 5 minutes so an OAP
+ * rollover or a backend switch is picked up without an explicit
+ * reload.
  *
  * The decision is per OAP target (keyed by `queryUrl`) — when the
  * operator points horizon at a different cluster, the probe runs
@@ -33,12 +38,10 @@
  */
 
 import { graphqlPost } from '../client/graphql.js';
-import type { FetchLike } from '@skywalking-horizon-ui/api-client';
-
-export type TraceProtocol = 'v2' | 'v3';
+import type { FetchLike, TraceQueryApi } from '@skywalking-horizon-ui/api-client';
 
 interface CacheEntry {
-  protocol: TraceProtocol;
+  api: TraceQueryApi;
   expiresAt: number;
 }
 
@@ -55,35 +58,35 @@ interface ProbeOpts {
 }
 
 const PROBE_QUERY = /* GraphQL */ `
-  query ProbeQueryTracesV2 {
+  query ProbeQueryTracesSupport {
     hasQueryTracesV2Support
   }
 `;
 
 /**
- * Returns the protocol the BFF should use for trace queries against
- * this OAP target. Probes once and caches; falls back to v3 on
- * probe failure since v3's `queryBasicTraces` is supported by every
- * shipped OAP version.
+ * Returns the native trace query the BFF should use against this OAP
+ * target. Probes once and caches; falls back to `queryBasicTraces` on
+ * probe failure since it is supported on every storage backend.
  */
-export async function detectTraceProtocol(opts: ProbeOpts): Promise<TraceProtocol> {
+export async function detectTraceQueryApi(opts: ProbeOpts): Promise<TraceQueryApi> {
   const now = Date.now();
   const cached = cache.get(opts.queryUrl);
-  if (cached && cached.expiresAt > now) return cached.protocol;
-  let protocol: TraceProtocol = 'v3';
+  if (cached && cached.expiresAt > now) return cached.api;
+  let api: TraceQueryApi = 'queryBasicTraces';
   try {
     const data = await graphqlPost<{ hasQueryTracesV2Support?: boolean }>(opts, PROBE_QUERY);
-    if (data.hasQueryTracesV2Support === true) protocol = 'v2';
+    if (data.hasQueryTracesV2Support === true) api = 'queryTraces';
   } catch {
-    // Probe failed — older OAP doesn't have the field, GraphQL errors
-    // out. Cache v3 so we don't re-probe on every list call.
+    // Probe failed — an OAP without the field errors the GraphQL out.
+    // Cache `queryBasicTraces` (works on every backend) so we don't
+    // re-probe on every list call.
   }
-  cache.set(opts.queryUrl, { protocol, expiresAt: now + CACHE_TTL_MS });
-  return protocol;
+  cache.set(opts.queryUrl, { api, expiresAt: now + CACHE_TTL_MS });
+  return api;
 }
 
 /** Force-invalidate the cache. Wired into the future "Refresh" admin
  *  affordance; not used by the runtime today. */
-export function invalidateTraceProtocolCache(): void {
+export function invalidateTraceQueryApiCache(): void {
   cache.clear();
 }

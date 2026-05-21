@@ -68,6 +68,7 @@ export type {
 export type {
   TraceSource,
   TracesConfig,
+  TraceQueryApi,
   TraceKeyValue,
   TraceLogEntry,
   TraceAttachedEvent,

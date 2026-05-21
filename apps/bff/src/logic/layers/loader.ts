@@ -213,8 +213,9 @@ export interface LayerTemplate {
   /** Traces tab config. The `source` field picks which trace backend
    *  the UI's filter selector defaults to (`both` shows two parallel
    *  tables; `native` / `zipkin` pin to one). Default `both` when
-   *  absent. The v2-vs-v3 split for native traces is decided at
-   *  runtime by probing `hasQueryTracesV2Support`, not in this config. */
+   *  absent. The native query choice (`queryTraces` vs
+   *  `queryBasicTraces`) is decided at runtime by probing
+   *  `hasQueryTracesV2Support`, not in this config. */
   traces?: TracesConfig;
   /** Logs tab config. Some layers carry per-instance logs (Istio Data
    *  Plane / sidecar access logs, eBPF profiling targets) — they need

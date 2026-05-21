@@ -25,10 +25,11 @@
  * we do NOT normalise into a "common" trace; each backend's fields
  * are surfaced verbatim, with its own waterfall renderer.
  *
- * Native traces themselves split into v2 (one call, spans inline)
- * and v3 (two calls, segment list + span fetch by traceId). The BFF
- * picks the right one based on `hasQueryTracesV2Support` and the
- * caller doesn't need to know which.
+ * Native traces are served by one of two OAP queries: `queryTraces`
+ * (one call, spans inline) or `queryBasicTraces` (segment list, then
+ * a per-trace `queryTrace` fetch by id). The BFF picks the right one
+ * based on `hasQueryTracesV2Support` and the caller doesn't need to
+ * know which.
  */
 
 // ── Trace source selector ──────────────────────────────────────────
@@ -41,7 +42,16 @@ export interface TracesConfig {
   source: TraceSource;
 }
 
-// ── Native trace types (SkyWalking v2 + v3 share the span shape) ───
+// ── Native trace types (both OAP queries share the span shape) ─────
+
+/** Which OAP query served the native trace list/detail. Driven by the
+ *  OAP storage backend, not its version:
+ *  - `queryTraces`      — Trace Query v2 API; returns the whole trace
+ *    (spans inline). Only available on the BanyanDB backend.
+ *  - `queryBasicTraces` — Trace Query v1 API; returns segment
+ *    summaries, the full trace is fetched on demand via
+ *    `queryTrace(traceId)`. Available on every backend (ES, …). */
+export type TraceQueryApi = 'queryTraces' | 'queryBasicTraces';
 
 export interface TraceKeyValue {
   key: string;
@@ -89,10 +99,10 @@ export interface NativeSpan {
   attachedEvents: TraceAttachedEvent[];
 }
 
-/** One row in the trace list. v2 + v3 share this shape. The
+/** One row in the trace list. Both queries share this shape. The
  *  segmentId / traceIds pair lets the operator open the full trace
- *  through the v3 fetch path; v2 already embeds spans so the list
- *  endpoint may surface them directly. */
+ *  through the `queryTrace`-by-id fetch path; `queryTraces` already
+ *  embeds spans so the list endpoint may surface them directly. */
 export interface NativeTraceListRow {
   key: string;
   segmentId: string;
@@ -101,9 +111,9 @@ export interface NativeTraceListRow {
   start: string;
   isError: boolean;
   traceIds: string[];
-  /** Only populated when the BFF served the list via v2 (spans
-   *  inline). v3 returns these undefined; the SPA fetches detail on
-   *  demand via the trace-by-id endpoint. */
+  /** Only populated when the BFF served the list via `queryTraces`
+   *  (spans inline). `queryBasicTraces` returns these undefined; the
+   *  SPA fetches detail on demand via the trace-by-id endpoint. */
   spans?: NativeSpan[];
 }
 
@@ -112,9 +122,10 @@ export type TraceQueryState = 'ALL' | 'SUCCESS' | 'ERROR';
 
 export interface NativeTraceListResponse {
   source: 'native';
-  /** Which OAP family answered — informational, surfaced as a small
-   *  chip in the UI so the operator knows what they're looking at. */
-  protocol: 'v2' | 'v3';
+  /** Which OAP query answered — informational, lets the SPA decide
+   *  whether list rows already carry spans (`queryTraces`) or need a
+   *  follow-up `queryTrace` fetch (`queryBasicTraces`). */
+  api: TraceQueryApi;
   traces: NativeTraceListRow[];
   reachable: boolean;
   error?: string;
@@ -122,7 +133,7 @@ export interface NativeTraceListResponse {
 
 export interface NativeTraceDetailResponse {
   source: 'native';
-  protocol: 'v2' | 'v3';
+  api: TraceQueryApi;
   traceId: string;
   spans: NativeSpan[];
   reachable: boolean;

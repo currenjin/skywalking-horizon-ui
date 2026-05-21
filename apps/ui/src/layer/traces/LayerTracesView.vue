@@ -203,6 +203,16 @@ const { native, isFetching, refetch } = useLayerTraces(layerKey, {
   enabled: queryEnabled,
 });
 
+// Which OAP query answered. `queryBasicTraces` (Trace Query v1 API)
+// returns trace SEGMENTS — each row is one segment and the full trace
+// is fetched on click via queryTrace. `queryTraces` (v2, BanyanDB
+// only) returns whole traces with spans inline, rendered immediately
+// on selection. The banner states the API and persists across the
+// browse + detail views so operators always know what a row is.
+const isSegmentList = computed(() => native.value?.api === 'queryBasicTraces');
+const traceApiLabel = computed(() => (native.value?.api === 'queryTraces' ? 'v2' : 'v1'));
+const showApiBanner = computed(() => hasQueried.value && !!native.value?.reachable);
+
 /**
  * Commit live filter values to the committed refs, then fire the
  * query. This is the only path that fetches — filter inputs don't
@@ -1153,13 +1163,26 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPageKeyDown, true)
       </section>
     </div>
 
+    <!-- Persists across browse + detail so the active trace-query API
+         (and what a row represents) stays visible after a click. -->
+    <div v-if="showApiBanner" class="tr-api-banner">
+      This OAP serves traces via <b>Trace Query {{ traceApiLabel }} API</b>
+      (<code>{{ native?.api }}</code>).
+      <template v-if="isSegmentList">
+        Each row is a trace <b>segment</b> — click one to fetch its full trace.
+      </template>
+      <template v-else>
+        Full traces are returned inline.
+      </template>
+    </div>
+
     <!-- Browsing mode: full-width list when no trace is selected -->
     <template v-if="!selectedTraceId">
       <article class="tr-list-card sw-card">
         <header class="tr-list-head">
-          <h4>Traces</h4>
+          <h4>{{ isSegmentList ? 'Segments' : 'Traces' }}</h4>
           <span v-if="native?.error" class="err-chip" :title="native.error">unreachable</span>
-          <span v-if="native" class="hint">{{ native.traces.length }} traces</span>
+          <span v-if="native" class="hint">{{ native.traces.length }} {{ isSegmentList ? 'segments' : 'traces' }}</span>
         </header>
         <div v-if="!hasQueried" class="tr-empty">
           Pick your conditions, then click <b>Run query</b>.
@@ -1215,7 +1238,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPageKeyDown, true)
           <button class="rail-handle" type="button" :title="railOpen ? 'Collapse list' : 'Expand list'" @click="railOpen = !railOpen">
             <span v-if="railOpen">«</span><span v-else>»</span>
           </button>
-          <h4 v-if="railOpen">Traces</h4>
+          <h4 v-if="railOpen">{{ isSegmentList ? 'Segments' : 'Traces' }}</h4>
           <span v-if="railOpen && native" class="hint">{{ native.traces.length }}</span>
         </header>
         <ul v-if="railOpen && visibleTraces.length" class="tr-rowlist rail-list">
@@ -1917,6 +1940,24 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPageKeyDown, true)
   background: rgba(239, 68, 68, 0.18);
   color: var(--sw-err);
 }
+.tr-api-banner {
+  padding: 7px 12px;
+  border: 1px solid var(--sw-line);
+  border-radius: 6px;
+  background: var(--sw-bg-2);
+  color: var(--sw-fg-2);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.tr-api-banner code {
+  font-family: var(--sw-mono);
+  font-size: 10.5px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--sw-bg-3);
+  color: var(--sw-accent);
+}
+.tr-api-banner b { color: var(--sw-fg-0); }
 .tr-empty { padding: 24px; text-align: center; color: var(--sw-fg-3); font-size: 11.5px; }
 .tr-rowlist {
   list-style: none;

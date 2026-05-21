@@ -28,8 +28,9 @@
  * slot. The UI renders two tables side-by-side; there's no field
  * mapping between the two — zipkin spans keep their zipkin shape.
  *
- * Native v2 vs v3 is auto-detected via {@link detectTraceProtocol}
- * — the caller doesn't need to know which OAP version is answering.
+ * The native query (`queryTraces` vs `queryBasicTraces`) is
+ * auto-detected via {@link detectTraceQueryApi} — the caller doesn't
+ * need to know which one the OAP backend answers with.
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -52,7 +53,7 @@ import type { SessionStore } from '../../user/sessions.js';
 import { requireAuth } from '../../user/middleware.js';
 import {  graphqlPost, buildOapOpts, type GraphqlOptions } from '../../client/graphql.js';
 import { getLayerTemplate, tracesConfigFor } from '../../logic/layers/loader.js';
-import { detectTraceProtocol } from '../../util/trace-protocol-cache.js';
+import { detectTraceQueryApi } from '../../util/trace-protocol-cache.js';
 import { zipkinFetchTraces, zipkinFetchTraceById, summariseZipkinTrace } from '../../client/zipkin.js';
 
 export interface TraceRouteDeps {
@@ -125,7 +126,7 @@ const LIST_SERVICES_FOR_RESOLVE = /* GraphQL */ `
   }
 `;
 
-const QUERY_BASIC_TRACES_V3 = /* GraphQL */ `
+const QUERY_BASIC_TRACES = /* GraphQL */ `
   query QueryBasicTraces($condition: TraceQueryCondition) {
     data: queryBasicTraces(condition: $condition) {
       traces {
@@ -140,8 +141,8 @@ const QUERY_BASIC_TRACES_V3 = /* GraphQL */ `
   }
 `;
 
-const QUERY_TRACES_V2 = /* GraphQL */ `
-  query QueryTracesV2($condition: TraceQueryCondition) {
+const QUERY_TRACES = /* GraphQL */ `
+  query QueryTraces($condition: TraceQueryCondition) {
     data: queryTraces(condition: $condition) {
       traces {
         spans {
@@ -256,7 +257,7 @@ async function fetchNativeList(
   body: TraceListBody,
   layerKey: string,
 ): Promise<NativeTraceListResponse> {
-  const protocol = await detectTraceProtocol(opts);
+  const api = await detectTraceQueryApi(opts);
   // Explicit start+end takes precedence over windowMinutes; falling
   // back to the rolling default when the explicit range is invalid.
   const explicit = body.start && body.end ? explicitWindow(body.start, body.end) : null;
@@ -271,7 +272,7 @@ async function fetchNativeList(
   } catch (err) {
     return {
       source: 'native',
-      protocol,
+      api,
       traces: [],
       reachable: false,
       error: err instanceof Error ? err.message : String(err),
@@ -279,10 +280,10 @@ async function fetchNativeList(
   }
   const condition = buildTraceCondition(body, serviceId, window);
   try {
-    if (protocol === 'v2') {
+    if (api === 'queryTraces') {
       const env = await graphqlPost<{
         data: { traces: Array<{ spans: NativeSpan[] }> };
-      }>(opts, QUERY_TRACES_V2, { condition });
+      }>(opts, QUERY_TRACES, { condition });
       const traces = (env.data?.traces ?? []).map((t) => {
         const root = t.spans.find((s) => s.parentSpanId === -1) ?? t.spans[0];
         const ids = Array.from(new Set(t.spans.map((s) => s.traceId)));
@@ -297,7 +298,7 @@ async function fetchNativeList(
           spans: t.spans,
         };
       });
-      return { source: 'native', protocol, traces, reachable: true };
+      return { source: 'native', api, traces, reachable: true };
     }
     const env = await graphqlPost<{
       data: {
@@ -310,7 +311,7 @@ async function fetchNativeList(
           traceIds: string[];
         }>;
       };
-    }>(opts, QUERY_BASIC_TRACES_V3, { condition });
+    }>(opts, QUERY_BASIC_TRACES, { condition });
     const traces = (env.data?.traces ?? []).map((t) => ({
       key: t.key,
       segmentId: t.key,
@@ -320,11 +321,11 @@ async function fetchNativeList(
       isError: t.isError,
       traceIds: t.traceIds,
     }));
-    return { source: 'native', protocol, traces, reachable: true };
+    return { source: 'native', api, traces, reachable: true };
   } catch (err) {
     return {
       source: 'native',
-      protocol,
+      api,
       traces: [],
       reachable: false,
       error: err instanceof Error ? err.message : String(err),
@@ -403,7 +404,7 @@ export function registerTraceRoutes(app: FastifyInstance, deps: TraceRouteDeps):
       const opts = buildOapOpts(deps.config.current, deps.fetch);
 
       if (source === 'native') {
-        const protocol = await detectTraceProtocol(opts);
+        const api = await detectTraceQueryApi(opts);
         try {
           const env = await graphqlPost<{ trace: { spans: NativeSpan[] } }>(
             opts,
@@ -412,7 +413,7 @@ export function registerTraceRoutes(app: FastifyInstance, deps: TraceRouteDeps):
           );
           const detail: NativeTraceDetailResponse = {
             source: 'native',
-            protocol,
+            api,
             traceId: params.traceId,
             spans: env.trace?.spans ?? [],
             reachable: true,
@@ -425,7 +426,7 @@ export function registerTraceRoutes(app: FastifyInstance, deps: TraceRouteDeps):
         } catch (err) {
           const detail: NativeTraceDetailResponse = {
             source: 'native',
-            protocol,
+            api,
             traceId: params.traceId,
             spans: [],
             reachable: false,
