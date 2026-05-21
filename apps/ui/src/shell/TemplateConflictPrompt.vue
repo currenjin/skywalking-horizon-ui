@@ -82,13 +82,13 @@ async function useLive(): Promise<void> {
   <Modal
     :open="open"
     :dismissable="false"
-    :title="confirmingRemote ? 'Use the live version?' : 'Local template changes not published'"
+    :title="confirmingRemote ? 'Use the live version?' : 'Template versions differ from OAP'"
   >
     <div v-if="!confirmingRemote" class="tcp">
       <p class="tcp__lede">
-        <b>{{ divergedCount }}</b> dashboard{{ divergedCount === 1 ? '' : 's' }} differ between your
-        <b>local</b> edits and what the OAP cluster currently serves (<b>remote</b>). Which version
-        should this session render?
+        <b>{{ divergedCount }}</b> dashboard{{ divergedCount === 1 ? '' : 's' }} differ between the
+        version OAP currently serves (<b>remote / live</b>) and your <b>local</b> copy — OAP may have
+        newer changes, or you have unpublished local edits. Which should this session render?
       </p>
       <ul class="tcp__list">
         <li v-for="(name, i) in divergedItems" :key="i">{{ name }}</li>
@@ -100,7 +100,7 @@ async function useLive(): Promise<void> {
     </div>
     <div v-else class="tcp">
       <p class="tcp__lede tcp__warn">
-        OAP holds a different (newer) version. Using live will <b>overwrite your
+        OAP holds a different version. Using live will <b>overwrite your
         {{ divergedCount }} local change{{ divergedCount === 1 ? '' : 's' }}</b> with the remote
         version — your local edits are <b>discarded and cannot be recovered</b>. Publish them with
         “Sync all to OAP” instead if you want to keep them. Override local with live?
