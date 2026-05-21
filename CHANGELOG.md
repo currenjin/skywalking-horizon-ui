@@ -16,7 +16,60 @@ ships a regenerated `LICENSE` + `NOTICE` that enumerate every bundled
 third-party package — produced by `scripts/collect-dist-licenses.mjs`
 during packaging and validated against a deny-list before signing.
 
-Fill in screen-facing highlights here before tagging.
+### Profiling
+
+- **pprof (Go) profiling** is fully wired: pick one event per task (CPU /
+  HEAP / BLOCK / MUTEX / GOROUTINE / ALLOCS / THREADCREATE), with duration
+  shown for CPU/BLOCK/MUTEX and a sampling-rate field for BLOCK/MUTEX. Create
+  and analyze both match OAP's single-event pprof schema.
+- **eBPF profiling** gets a reworked process picker — click a row to expand
+  its full attributes, selection lives on the checkbox, anchored pop-out — a
+  refresh button on every task list, Intl-formatted times, and a hover-info
+  frame on the flame graph. Flame-graph thrash on re-analyze is gone.
+- The shared flame graph fixes "% of root" (it read a never-aggregated count)
+  and highlights the selected frame across all four profilers.
+- After creating any profiling task (trace / async / eBPF / network / pprof)
+  the list now polls up to 4× at 10s until the new task shows up, instead of
+  leaving a stale pre-create list.
+
+### Network profiling & process topology
+
+- A booster-style honeycomb process topology: pods as hexagons, peers hugging
+  the boundary, animated protocol-coloured edges (HTTP/TCP/TLS), a node
+  pop-over, and a wide client | server edge-metric dashboard. Network task
+  creation and the task-list query now use OAP's schema field names.
+
+### Platform monitoring (operate)
+
+- Two new read-only operate pages: **Data retention** (TTL — `getRecordsTTL` /
+  `getMetricsTTL`) and **OAP configuration** (the admin-port config dump, with
+  OAP-masked secrets). Gated on new `ttl:read` / `config:read` verbs granted to
+  maintainer and above.
+- The operate sidebar now leads with a single **Platform monitoring** group
+  (cluster status, data retention, OAP configuration) above the per-layer
+  self-observability dashboards.
+
+### Auth, RBAC & resilience
+
+- Every OAP call — GraphQL, admin REST, and Zipkin — now carries the
+  configured basic-auth credentials, so a secured OAP no longer 401s pages.
+- The sidebar is RBAC-gated by read verb, the Roles page shows a per-role
+  menu-visibility matrix, and the Users page labels per-node "Active (24h)" /
+  "Last seen" honestly (these are tracked per BFF replica, not cluster-wide).
+- When OAP is unreachable the menu and admin loaders fall back to bundled
+  templates, and non-JSON OAP responses surface a clear diagnostic.
+
+### Smaller touches
+
+- Top-N widgets get hover tooltips for long names and a title-bar pop-out to
+  the full ranked list; redundant single-service name prefixes are dropped.
+- The admin template-diff modal is a wide side-by-side view with labelled
+  bundled-vs-OAP columns and an explanation of what the template drives; the
+  layer-dashboards admin rail gains an in-page search.
+- Per-layer alarm filtering uses the singular `queryAlarms` layer condition.
+- Dependency hygiene for the release: `dompurify` ≥ 3.3.2 and
+  `@fastify/static` ≥ 9.1.1 (clears the known advisories); the `general`
+  layer drops `networkProfiling`, which is instance-scoped to k8s / mesh.
 
 ## 0.4.0
 

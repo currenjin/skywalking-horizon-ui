@@ -52,6 +52,11 @@ onMounted(() => {
     fontSize: 13,
     minimap: { enabled: false },
     renderSideBySide: true,
+    // Monaco collapses to a single inline column when the editor is
+    // narrower than ~900px (default). That hides the "original" (left)
+    // side entirely. Keep side-by-side regardless of width so the
+    // bundled-vs-remote comparison always shows both columns.
+    useInlineViewWhenSpaceIsLimited: false,
     readOnly: true,
     originalEditable: false,
   });

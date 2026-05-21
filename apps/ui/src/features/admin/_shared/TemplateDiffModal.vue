@@ -126,13 +126,29 @@ async function onReset(): Promise<void> {
 </script>
 
 <template>
-  <Modal :open="open" :title="`Template diff — ${name}`" @close="emit('close')">
+  <Modal :open="open" :title="`Template diff — ${name}`" width="80vw" fit-body @close="emit('close')">
     <div v-if="loading" class="tdm__loading">Loading sync status…</div>
     <div v-else-if="loadError" class="tdm__err">{{ loadError }}</div>
     <template v-else-if="row">
-      <div class="tdm__legend">
-        <span class="tdm__legend-l">Left: <strong>bundled</strong> (the BFF's seed JSON)</span>
-        <span class="tdm__legend-r">Right: <strong>OAP-stored</strong> (operator-edited)</span>
+      <p class="tdm__about">
+        This is the dashboard definition for <code>{{ name }}</code>. It drives the rendered
+        page for this scope — the <strong>widget layout</strong>, each widget's
+        <strong>metric (MQE) expression</strong>, and which <strong>components / tabs</strong>
+        appear. A difference means the template stored on OAP was edited (by an operator or
+        another UI) and no longer matches the JSON bundled in this build; the live UI follows
+        the right (OAP-stored) side until you reset.
+      </p>
+      <div class="tdm__cols">
+        <div class="tdm__col tdm__col--l">
+          <span class="tdm__col-side">◀ LEFT</span>
+          <span class="tdm__col-name">bundled</span>
+          <span class="tdm__col-note">the build's seed JSON (source of truth)</span>
+        </div>
+        <div class="tdm__col tdm__col--r">
+          <span class="tdm__col-side">RIGHT ▶</span>
+          <span class="tdm__col-name">OAP-stored</span>
+          <span class="tdm__col-note">what's live now (operator-edited)</span>
+        </div>
       </div>
       <div class="tdm__diff">
         <MonacoDiff :original="bundledPretty" :modified="remotePretty" language="json" />
@@ -146,7 +162,7 @@ async function onReset(): Promise<void> {
           considered the source of truth after this action.
         </p>
         <label class="tdm__reset-label">
-          Type <code>{{ confirmKey }}</code> to arm the Reset button:
+          <span>Type <code class="tdm__reset-key">{{ confirmKey }}</code> to arm the Reset button:</span>
           <input
             v-model="typed"
             type="text"
@@ -183,23 +199,61 @@ async function onReset(): Promise<void> {
 .tdm__err {
   color: var(--rr-danger, #c0392b);
 }
-.tdm__legend {
-  display: flex;
-  justify-content: space-between;
-  padding: 6px 8px;
-  font-size: 11px;
+.tdm__about {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.55;
   color: var(--rr-ink2);
-  border-bottom: 1px solid var(--rr-border, #2a2f38);
+  background: var(--rr-bg, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--rr-border, #2a2f38);
+  border-radius: var(--rr-radius, 6px);
 }
-.tdm__legend-l { color: var(--sw-text-muted, #8a93a0); }
-.tdm__legend-r { color: var(--sw-warn, #b88500); }
+.tdm__about code {
+  font-family: var(--rr-font-mono, ui-monospace, monospace);
+}
+/* Two column headers aligned 50/50 over the side-by-side diff panes, so
+ * it's unambiguous which side is bundled vs OAP-stored. */
+.tdm__cols {
+  display: flex;
+  border: 1px solid var(--rr-border, #2a2f38);
+  border-bottom: none;
+  border-top-left-radius: var(--rr-radius, 6px);
+  border-top-right-radius: var(--rr-radius, 6px);
+  overflow: hidden;
+}
+.tdm__col {
+  flex: 1 1 50%;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 12px;
+  font-size: 11.5px;
+  background: var(--rr-bg3, rgba(255, 255, 255, 0.03));
+}
+.tdm__col--l { border-right: 1px solid var(--rr-border, #2a2f38); }
+.tdm__col--r { justify-content: flex-start; }
+.tdm__col-side {
+  font-family: var(--rr-font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--rr-dim, #6b7280);
+}
+.tdm__col--l .tdm__col-name { color: var(--sw-text-muted, #8a93a0); font-weight: 600; }
+.tdm__col--r .tdm__col-name { color: var(--sw-warn, #b88500); font-weight: 600; }
+.tdm__col-name { font-family: var(--rr-font-mono, ui-monospace, monospace); }
+.tdm__col-note { color: var(--rr-ink2); font-size: 11px; }
 .tdm__diff {
-  height: 50vh;
-  min-height: 400px;
+  /* Absorb the leftover height inside the fit-mode modal body and scroll
+   * internally — keeps the popout itself free of a vertical scrollbar. */
+  flex: 1;
+  min-height: 0;
   border-bottom: 1px solid var(--rr-border, #2a2f38);
 }
 .tdm__reset {
-  padding: 14px 6px 4px;
+  flex: 0 0 auto;
+  padding: 12px 6px 2px;
 }
 .tdm__reset h4 {
   margin: 0 0 6px;
@@ -215,10 +269,17 @@ async function onReset(): Promise<void> {
 }
 .tdm__reset-label {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
   font-size: 12px;
   color: var(--rr-ink2);
+  white-space: nowrap;
+}
+.tdm__reset-key {
+  color: var(--sw-danger, #c0392b);
+  font-family: var(--rr-font-mono, ui-monospace, monospace);
+  font-weight: 600;
 }
 .tdm__reset-input {
   font-family: var(--rr-font-mono, ui-monospace, monospace);

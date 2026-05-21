@@ -137,10 +137,19 @@ function rolePill(role: string): string {
           <div class="kpi-value">{{ data.counts.local }}</div>
         </div>
         <div class="kpi-card">
-          <div class="kpi-label">Active (24h)</div>
+          <div
+            class="kpi-label"
+            title="Last-seen activity is tracked in each BFF replica's own memory and is NOT shared across the cluster. This count reflects only the node that served this page."
+          >
+            Active (24h) <span class="kpi-scope">· this node</span>
+          </div>
           <div class="kpi-value ok">{{ data.counts.activeLast24h }}</div>
         </div>
       </div>
+      <p class="node-note">
+        Last-seen &amp; Active (24h) are tracked per BFF node (in-memory, not cluster-shared) —
+        served by <code>{{ data.node }}</code>. In a multi-replica deploy these reflect this node only.
+      </p>
 
       <!-- Users table -->
       <section class="sw-card">
@@ -171,7 +180,7 @@ function rolePill(role: string): string {
               <th>Username</th>
               <th>Source</th>
               <th>Roles</th>
-              <th>Last seen</th>
+              <th title="Per-node: tracked in this BFF replica's memory only, not shared across the cluster.">Last seen <span class="th-scope">· this node</span></th>
               <th>IP</th>
               <th>Note</th>
             </tr>
@@ -262,8 +271,11 @@ function rolePill(role: string): string {
   border-radius: 6px;
   font-size: 11.5px;
   margin-bottom: 14px;
-  align-items: start;
+  /* Align the leading icon to the first line of the body text (the two
+   * differ in size/weight, so `start` left them on different baselines). */
+  align-items: baseline;
 }
+.hint-body { line-height: 1.55; }
 .hint-info {
   background: rgba(56,189,248,0.06);
   border: 1px solid rgba(56,189,248,0.3);
@@ -290,6 +302,29 @@ function rolePill(role: string): string {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--sw-fg-3);
+}
+.kpi-scope {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--sw-warn);
+  cursor: help;
+}
+.node-note {
+  margin: -4px 0 14px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--sw-fg-3);
+}
+.node-note code {
+  font-family: var(--sw-mono);
+  color: var(--sw-fg-1);
+}
+.th-scope {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  color: var(--sw-warn);
+  cursor: help;
 }
 .kpi-value {
   font-size: 22px;

@@ -26,6 +26,9 @@
     "typescript": "~5.6.3"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["argon2", "esbuild", "@parcel/watcher", "vue-demi"]
+    "onlyBuiltDependencies": ["argon2", "esbuild", "@parcel/watcher", "vue-demi"],
+    "overrides": {
+      "dompurify@<3.3.2": ">=3.3.2"
+    }
   }
 }

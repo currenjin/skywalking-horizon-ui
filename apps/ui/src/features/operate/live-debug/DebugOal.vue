@@ -479,7 +479,7 @@ const allFolded = computed<boolean>(
         OAL source class<span v-if="sources.length !== 1">es</span> registered
         across {{ files.length }} <code>.oal</code> file<span v-if="files.length !== 1">s</span>.
         Browse them in
-        <router-link to="/oal" class="oal__link">OAL catalog</router-link>
+        <router-link to="/operate/oal" class="oal__link">OAL catalog</router-link>
         — every <code>metric = from(Source…)</code> line has a green ▶ that
         deep-links here with the picker pre-filled.
       </p>
@@ -687,6 +687,26 @@ const allFolded = computed<boolean>(
   color: var(--rr-err, #f44);
   font-size: 12px;
   margin: 0;
+}
+.oal__hint {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--rr-ink2);
+  margin: 0;
+}
+.oal__hint code {
+  font-family: var(--rr-font-mono);
+  color: var(--rr-ink);
+}
+/* Inline accent link — was unstyled and fell back to the browser default
+ * link color, which clashes with the dark theme. */
+.oal__link {
+  color: var(--rr-accent, var(--sw-accent, #38bdf8));
+  text-decoration: none;
+  font-weight: 600;
+}
+.oal__link:hover {
+  text-decoration: underline;
 }
 
 .oal__empty {

@@ -147,7 +147,11 @@ function nodeStatusTone(status: NodeSlice['status']): 'ok' | 'info' | 'warn' | '
         >
           {{ dbg.state.value }}
         </Pill>
-        <code v-if="dbg.sessionId.value" class="dv__sid">{{ dbg.sessionId.value }}</code>
+        <code
+          v-if="dbg.sessionId.value"
+          class="dv__sid"
+          :title="dbg.sessionId.value"
+        >{{ dbg.sessionId.value.slice(0, 8) }}…</code>
       </span>
     </header>
 

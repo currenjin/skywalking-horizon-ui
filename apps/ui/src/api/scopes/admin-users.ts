@@ -30,6 +30,10 @@ export interface AdminUserRow {
 export interface AdminUsersResponse {
   generatedAt: number;
   backend: 'local' | 'ldap';
+  /** Host that served this request (pod name under k8s). The seen-cache
+   *  data (last-seen, active-24h, LDAP listing) is process-local, so the
+   *  UI labels those as reflecting this node only. */
+  node: string;
   rows: AdminUserRow[];
   counts: {
     total: number;

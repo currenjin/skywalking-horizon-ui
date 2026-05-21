@@ -17,10 +17,21 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount } from 'vue';
 
-const props = defineProps<{
-  open: boolean;
-  title: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    open: boolean;
+    title: string;
+    /** Panel width — any CSS length. Defaults to the narrow form dialog;
+     *  wide surfaces (side-by-side diffs) pass e.g. `80vw`. */
+    width?: string;
+    /** When true the body becomes a flex column with no scroll of its
+     *  own — a child marked `flex: 1` (e.g. a diff editor) absorbs the
+     *  leftover height and scrolls internally, so the popout never grows
+     *  a vertical scrollbar. */
+    fitBody?: boolean;
+  }>(),
+  { width: '520px', fitBody: false },
+);
 
 const emit = defineEmits<{ close: [] }>();
 
@@ -35,7 +46,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 <template>
   <Teleport to="body">
     <div v-if="open" class="modal" role="dialog" aria-modal="true" @click.self="emit('close')">
-      <div class="modal__panel">
+      <div class="modal__panel" :class="{ 'modal__panel--fit': fitBody }" :style="{ width: props.width }">
         <header class="modal__header">
           <span class="modal__title">{{ title }}</span>
           <button
@@ -47,7 +58,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
             ×
           </button>
         </header>
-        <div class="modal__body"><slot /></div>
+        <div class="modal__body" :class="{ 'modal__body--fit': fitBody }"><slot /></div>
         <footer v-if="$slots.footer" class="modal__footer"><slot name="footer" /></footer>
       </div>
     </div>
@@ -66,6 +77,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 }
 
 .modal__panel {
+  /* width comes from the `width` prop (inline style); this is the
+   * fallback for any consumer that doesn't pass one. */
   width: 520px;
   max-width: calc(100vw - 32px);
   background: var(--rr-bg2);
@@ -75,6 +88,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   flex-direction: column;
   max-height: calc(100vh - 64px);
   overflow: hidden;
+}
+/* Fit mode: take a concrete height so the flex body can fill it and the
+ * diff child can claim the slack. */
+.modal__panel--fit {
+  height: calc(100vh - 64px);
 }
 
 .modal__header {
@@ -111,6 +129,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   overflow: auto;
   font-size: 13px;
   color: var(--rr-ink);
+}
+/* Fit mode: fill the panel height, no own scroll — a `flex: 1` child
+ * (e.g. the diff editor) takes the slack and scrolls internally. */
+.modal__body--fit {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .modal__footer {

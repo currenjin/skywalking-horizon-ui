@@ -232,6 +232,14 @@ note "Step 8 — Prepare release commit + tag ${TAG}"
 
 cd "${CLONE_DIR}"
 
+# The release commit is NEVER pushed straight to ${REPO_BRANCH} — main is
+# protected, and ASF review wants the version change to land via PR. Cut a
+# dedicated release branch; the tag is created on the release commit here,
+# and the next-dev bump is added as a second commit on the SAME branch in
+# Step 15 so one PR carries both (version strip → tag → back to -dev).
+RELEASE_BRANCH_NAME="prepare-release-${RELEASE_VERSION}"
+git checkout -b "${RELEASE_BRANCH_NAME}"
+
 # Strip the -dev suffix on every code marker in the clone. The committed
 # release-tagged commit must carry the bare semver.
 node -e "
@@ -266,8 +274,11 @@ if git ls-remote --tags origin | grep -q "refs/tags/${TAG}$"; then
     exit 1
 fi
 git tag "${TAG}"
-git push origin HEAD:"${REPO_BRANCH}" "${TAG}"
-echo "Pushed release commit + tag ${TAG}."
+# Push the release commit on its own branch + the tag (the tag points at
+# the release commit). The branch is merged into ${REPO_BRANCH} via the PR
+# opened in Step 15 — after the next-dev bump is added on top.
+git push --set-upstream origin "${RELEASE_BRANCH_NAME}" "${TAG}"
+echo "Pushed release branch ${RELEASE_BRANCH_NAME} + tag ${TAG} (tag → release commit; not pushed to ${REPO_BRANCH})."
 
 # ========================== Step 9: Build source tarball ==========================
 note "Step 9 — Build source tarball"
@@ -470,16 +481,20 @@ Voting will start now (${VOTE_DATE}) and will remain open for at least
 ========================================================================
 EOF
 
-# ========================== Step 15: Prepare next version ==========================
-note "Step 15 — Prepare next-version (${NEXT_RELEASE_VERSION}) PR"
+# ========================== Step 15: Next-dev bump + release PR ==========================
+note "Step 15 — Add next-dev bump (${NEXT_RELEASE_VERSION}-dev) + open release PR"
 
-if ! confirm "Push next-version PR (${NEXT_RELEASE_VERSION}) now?"; then
-    echo "Skipping next-version PR. Release artifacts are in ${WORK_DIR}/."
+if ! confirm "Add the next-dev bump on ${RELEASE_BRANCH_NAME} and open the release PR now?"; then
+    echo "Skipping the next-dev commit + PR. Release artifacts are in ${WORK_DIR}/."
+    echo "Release branch ${RELEASE_BRANCH_NAME} + tag ${TAG} are already pushed; open the PR manually when ready."
     exit 0
 fi
 
 cd "${CLONE_DIR}"
-git checkout -b "prepare-next-${NEXT_RELEASE_VERSION}"
+# Stay on the release branch — the next-dev bump is a SECOND commit on top
+# of the tagged release commit, so one PR carries both: the version strip
+# (tagged) and the return to -dev for the next cycle.
+git checkout "${RELEASE_BRANCH_NAME}"
 
 # Bump every code marker to the next dev-suffixed version.
 NEXT_DEV_VERSION="${NEXT_RELEASE_VERSION}-dev"
@@ -521,15 +536,31 @@ fs.writeFileSync(path, out);
 
 git add package.json packages/*/package.json apps/*/package.json apps/bff/src/server.ts CHANGELOG.md
 git commit -m "Prepare next release ${NEXT_DEV_VERSION}"
-git push --set-upstream origin "prepare-next-${NEXT_RELEASE_VERSION}"
+git push origin "${RELEASE_BRANCH_NAME}"
 
-gh pr create --title "Prepare next release ${NEXT_DEV_VERSION}" \
-    --body "Bump every package version to ${NEXT_DEV_VERSION} and rotate CHANGELOG for the next development cycle after ${RELEASE_VERSION}." \
+gh pr create --title "Release ${RELEASE_VERSION}, bump to ${NEXT_DEV_VERSION}" \
+    --body "$(cat <<PRBODY
+Release branch for ${RELEASE_VERSION}. Two commits:
+
+1. \`Prepare release ${RELEASE_VERSION}\` — strips \`-dev\` from every package
+   marker + \`apps/bff/src/server.ts\`; advances container-image docs to
+   \`${RELEASE_VERSION}\`. Tagged \`${TAG}\` (the release-candidate commit the
+   vote runs against).
+2. \`Prepare next release ${NEXT_DEV_VERSION}\` — bumps every marker to
+   \`${NEXT_DEV_VERSION}\` and rotates CHANGELOG for the next cycle.
+
+Merge after the [VOTE] passes so \`${REPO_BRANCH}\` returns to a \`-dev\`
+version with the release in its history. The \`${TAG}\` tag is immutable and
+keeps pointing at commit 1 regardless of how this PR is merged.
+PRBODY
+)" \
+    --head "${RELEASE_BRANCH_NAME}" \
     --base "${REPO_BRANCH}"
 
 note "Done."
 echo "  Release version:    ${RELEASE_VERSION}"
 echo "  Next dev version:   ${NEXT_DEV_VERSION}"
+echo "  Release branch:     ${RELEASE_BRANCH_NAME} (PR open → ${REPO_BRANCH})"
 echo "  SVN dev staging:    ${SVN_DEV_URL}/${RELEASE_VERSION}"
 echo "  Release tag:        ${TAG}"
 echo ""
@@ -537,4 +568,5 @@ echo "Next steps:"
 echo "  1. Send the vote email above to dev@skywalking.apache.org."
 echo "  2. After the vote passes, run:  svn mv ${SVN_DEV_URL}/${RELEASE_VERSION} \\"
 echo "         https://dist.apache.org/repos/dist/release/skywalking/horizon-ui/${RELEASE_VERSION}"
-echo "  3. Merge the next-version PR."
+echo "  3. Merge the release PR (${RELEASE_BRANCH_NAME} → ${REPO_BRANCH}): brings the"
+echo "     version strip + next-dev bump into ${REPO_BRANCH}; tag ${TAG} stays put."

@@ -28,6 +28,7 @@
  * comes from the seen cache when available; otherwise null ("never").
  */
 
+import { hostname } from 'node:os';
 import type { FastifyInstance } from 'fastify';
 import type { ConfigSource } from '../../config/loader.js';
 import type { UserSeenCache, SeenSource } from '../../user/seen-cache.js';
@@ -57,6 +58,12 @@ export interface AdminUserRow {
 export interface AdminUsersBody {
   generatedAt: number;
   backend: 'local' | 'ldap';
+  /** Host that served this request — pod name under k8s. The seen-cache
+   *  (last-seen + active-24h + the LDAP listing) is process-local, so
+   *  these numbers reflect only this node. In a multi-replica deploy the
+   *  UI surfaces this so operators read the counts as per-node, not
+   *  cluster-wide. */
+  node: string;
   rows: AdminUserRow[];
   counts: {
     total: number;
@@ -118,6 +125,7 @@ export function registerAdminUsersRoute(app: FastifyInstance, deps: UsersRouteDe
     const body: AdminUsersBody = {
       generatedAt: now,
       backend: cfg.auth.backend,
+      node: hostname(),
       rows,
       counts,
     };

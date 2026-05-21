@@ -102,6 +102,15 @@ const saveMsg = ref<string | null>(null);
  *  editor can claim the full width. The toggle in the rail header
  *  flips this; layer switching still works via dot click. */
 const layerListOpen = ref(true);
+/** Free-text filter for the layers rail — matches alias or key. */
+const layerSearch = ref('');
+const filteredTemplates = computed<AdminLayerTemplate[]>(() => {
+  const q = layerSearch.value.trim().toLowerCase();
+  if (!q) return templates.value;
+  return templates.value.filter(
+    (t) => (t.alias ?? '').toLowerCase().includes(q) || t.key.toLowerCase().includes(q),
+  );
+});
 
 /** Working copy — reactively edited. Diffs against `templates` to drive
  *  the Save / Reset state. */
@@ -922,12 +931,24 @@ const namingTest = computed<NamingTestResult>(() => {
           </button>
           <h4 v-if="layerListOpen">Layers</h4>
           <span v-if="layerListOpen" class="sub">
-            {{ templates.length }} template{{ templates.length === 1 ? '' : 's' }}
+            {{ layerSearch.trim()
+              ? `${filteredTemplates.length} / ${templates.length}`
+              : `${templates.length} template${templates.length === 1 ? '' : 's'}` }}
           </span>
         </div>
         <template v-if="layerListOpen">
+          <div class="list-search">
+            <input
+              v-model="layerSearch"
+              type="text"
+              class="list-search-input"
+              placeholder="Search layers…"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
           <button
-            v-for="t in templates"
+            v-for="t in filteredTemplates"
             :key="t.key"
             class="layer-row"
             :class="{ active: selectedKey === t.key }"
@@ -937,6 +958,9 @@ const namingTest = computed<NamingTestResult>(() => {
             <span class="name">{{ t.alias || t.key }}</span>
             <TemplateStatusBadge :status="sync.badgeFor(`horizon.layer.${t.key}`)" />
           </button>
+          <p v-if="filteredTemplates.length === 0" class="list-empty">
+            No layers match “{{ layerSearch }}”.
+          </p>
         </template>
         <!-- Collapsed mode shows just colored dots for navigation; click
              a dot to switch layers without expanding. -->
@@ -2083,6 +2107,30 @@ const namingTest = computed<NamingTestResult>(() => {
 }
 .list-head .sub {
   font-size: 10px;
+  color: var(--sw-fg-3);
+  margin-left: auto;
+}
+.list-search {
+  padding: 0 10px 8px;
+}
+.list-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--sw-bg-1);
+  border: 1px solid var(--sw-line-2);
+  border-radius: 5px;
+  color: var(--sw-fg-0);
+  font: inherit;
+  font-size: 11.5px;
+  padding: 5px 8px;
+}
+.list-search-input:focus {
+  outline: none;
+  border-color: var(--sw-accent);
+}
+.list-empty {
+  padding: 8px 10px;
+  font-size: 11px;
   color: var(--sw-fg-3);
 }
 .layer-row {

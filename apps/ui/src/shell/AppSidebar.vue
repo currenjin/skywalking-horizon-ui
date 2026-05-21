@@ -115,11 +115,17 @@ function bucket(rows: SidebarLayer[]): SidebarEntry[] {
   }
   return out;
 }
+// Public layers mirror the Overview/landing order (landing.priority) so
+// the two surfaces stay in lockstep.
 const publicLayers = computed(() =>
   orderedLayers.value.filter((L) => L.visibility !== 'operate'),
 );
+// Operate (Platform monitoring) layers follow the sidebar/menu placement
+// — the BFF catalog order — NOT landing.priority. Landing priority is an
+// Overview-page concept the operator can edit; it must not reorder the
+// operate sidebar. `availableLayers` preserves the menu order as returned.
 const operateLayers = computed(() =>
-  orderedLayers.value.filter((L) => L.visibility === 'operate'),
+  availableLayers.value.filter((L) => L.visibility === 'operate'),
 );
 const sidebarEntries = computed<SidebarEntry[]>(() => bucket(publicLayers.value));
 
@@ -203,17 +209,6 @@ const sections: NavSection[] = [
     links: [
       { icon: 'alert', label: 'Alerting rules', to: '/operate/alerting-rules', verb: 'alarm-rule:read' },
       {
-        icon: 'flame',
-        label: 'Live debugger',
-        to: '/operate/live-debug',
-        verb: 'live-debug:read',
-        // Match the tab variants only; the history sibling at
-        // /operate/live-debug/history must NOT highlight this row.
-        activeWhen: (p) => p === '/operate/live-debug' || /^\/operate\/live-debug\/(mal|lal|oal)(\/|$)/.test(p),
-      },
-      { icon: 'event', label: 'Capture history', to: '/operate/live-debug/history', verb: 'live-debug:read' },
-      { icon: 'metric', label: 'Metrics Inspect', to: '/operate/inspect', verb: 'inspect:read' },
-      {
         icon: 'set',
         label: 'DSL Management',
         // No standalone landing — `to` jumps to the first rule page so
@@ -230,6 +225,17 @@ const sections: NavSection[] = [
           { icon: 'download', label: 'Dump & restore', to: '/operate/dsl/dump', verb: 'rule:read' },
         ],
       },
+      {
+        icon: 'flame',
+        label: 'Live debugger',
+        to: '/operate/live-debug',
+        verb: 'live-debug:read',
+        // Match the tab variants only; the history sibling at
+        // /operate/live-debug/history must NOT highlight this row.
+        activeWhen: (p) => p === '/operate/live-debug' || /^\/operate\/live-debug\/(mal|lal|oal)(\/|$)/.test(p),
+      },
+      { icon: 'event', label: 'Capture history', to: '/operate/live-debug/history', verb: 'live-debug:read' },
+      { icon: 'metric', label: 'Metrics Inspect', to: '/operate/inspect', verb: 'inspect:read' },
     ],
   },
   {
