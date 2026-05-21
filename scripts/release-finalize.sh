@@ -39,9 +39,8 @@
 #   3. Build + push the multi-arch (amd64 + arm64) container image to
 #      Docker Hub apache/skywalking-ui, tagged:
 #         :horizon-<v>     immutable, this release
-#         :horizon-latest  moving Horizon pointer
-#         :latest          moving repo pointer  (overrides booster-ui's —
-#                          confirmed interactively before pushing)
+#         :latest          moving — newest Horizon release. On this shared
+#                          repo, `latest` serves Horizon (not booster-ui).
 #
 # Usage:  bash scripts/release-finalize.sh
 #
@@ -281,17 +280,13 @@ if ! docker buildx inspect "${BUILDER_NAME}" >/dev/null 2>&1; then
 fi
 docker run --privileged --rm tonistiigi/binfmt --install arm64,amd64 >/dev/null 2>&1 || true
 
-IMG_TAGS=(-t "${DOCKERHUB_REPO}:horizon-${RELEASE_VERSION}" -t "${DOCKERHUB_REPO}:horizon-latest")
+# Horizon publishes the immutable per-release tag plus the moving `latest`
+# on the shared repo. `latest` here points at the newest Horizon release —
+# pulling `${DOCKERHUB_REPO}:latest` gets Horizon, not booster-ui.
+IMG_TAGS=(-t "${DOCKERHUB_REPO}:horizon-${RELEASE_VERSION}" -t "${DOCKERHUB_REPO}:latest")
 echo "Image tags to push:"
-echo "  ${DOCKERHUB_REPO}:horizon-${RELEASE_VERSION}   (immutable)"
-echo "  ${DOCKERHUB_REPO}:horizon-latest              (moving Horizon pointer)"
-echo ""
-echo "Bare ':latest' on a SHARED repo overrides booster-ui's :latest —"
-echo "anyone pulling ${DOCKERHUB_REPO}:latest would then get Horizon."
-if confirm "Also push the bare ':latest' tag?"; then
-    IMG_TAGS+=(-t "${DOCKERHUB_REPO}:latest")
-    echo "Will also push :latest."
-fi
+echo "  ${DOCKERHUB_REPO}:horizon-${RELEASE_VERSION}   (immutable, this release)"
+echo "  ${DOCKERHUB_REPO}:latest                      (moving — newest Horizon release)"
 
 if confirm "Build linux/amd64+arm64 and push to Docker Hub now? (emulated arch is slow)"; then
     docker buildx build \
@@ -320,7 +315,7 @@ echo "  GitHub:        https://github.com/apache/skywalking-horizon-ui/releases/
 echo "  Docker Hub:    ${DOCKERHUB_REPO}:horizon-${RELEASE_VERSION}"
 echo ""
 echo "Remaining manual steps:"
-echo "  1. Update the Docker Hub repo README from dist-material/docker-hub/README.md"
+echo "  1. Update the Docker Hub repo overview if needed"
 echo "     (Docker Hub → ${DOCKERHUB_REPO} → 'Repository overview' → edit)."
 echo "  2. Send the [ANNOUNCE] email to dev@ + announce@apache.org."
 echo "  3. Update the download page on the SkyWalking website."
