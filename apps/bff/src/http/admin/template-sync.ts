@@ -147,6 +147,50 @@ export function registerTemplateSyncAdminRoutes(
     },
   );
 
+  // Sync-all: push the bundled copy of every template that differs from
+  // OAP (status `diverged`) or is absent from OAP (status
+  // `bundled-fallback`) in one batch. Optionally scoped to a single
+  // `kind` so the layer / overview admin pages each sync only their own
+  // family. The caller is expected to have confirmed the operation (the
+  // UI shows the affected list first); this route re-derives the diff
+  // set server-side so a stale UI can't push something already in sync.
+  app.post<{
+    Body: { kind?: TemplateKind };
+  }>('/api/admin/templates/sync-all', { preHandler: auth }, async (req, reply) => {
+    const kind = req.body?.kind;
+    const status = await loadStatus(deps);
+    if (status.unreachable) {
+      return reply.code(409).send({
+        code: 'oap_unreachable',
+        message: 'OAP admin port unreachable — templates are read-only',
+      });
+    }
+    const targets = status.rows.filter(
+      (r) =>
+        (!kind || r.kind === kind) &&
+        !!r.bundled &&
+        (r.status === 'diverged' || r.status === 'bundled-fallback'),
+    );
+    const synced: string[] = [];
+    const failed: Array<{ name: string; error: string }> = [];
+    for (const row of targets) {
+      try {
+        if (row.remote) {
+          await deps.uiTemplateClient().update(row.remote.id, row.bundled!.configuration);
+        } else {
+          await deps.uiTemplateClient().create(row.bundled!.configuration);
+        }
+        synced.push(row.name);
+      } catch (err) {
+        logger.warn({ err: errMsg(err), name: row.name }, 'sync-all push failed');
+        failed.push({ name: row.name, error: errMsg(err) });
+      }
+    }
+    resync();
+    const fresh = await loadStatus(deps);
+    return reply.send({ ...fresh, synced, failed });
+  });
+
   app.post<{
     Body: {
       name?: string;

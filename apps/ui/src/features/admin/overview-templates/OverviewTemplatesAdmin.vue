@@ -46,6 +46,7 @@ import type {
 import { bff } from '@/api/client';
 import { useLayers } from '@/shell/useLayers';
 import SyncStatusBanner from '@/features/admin/_shared/SyncStatusBanner.vue';
+import SyncAllButton from '@/features/admin/_shared/SyncAllButton.vue';
 import TemplateStatusBadge from '@/features/admin/_shared/TemplateStatusBadge.vue';
 import TemplateDiffModal from '@/features/admin/_shared/TemplateDiffModal.vue';
 import { useTemplateSync } from '@/features/admin/_shared/useTemplateSync';
@@ -503,6 +504,10 @@ function widgetKindLabel(type: OverviewWidget['type']): string {
     </header>
 
     <SyncStatusBanner :banner="sync.banner.value" />
+
+    <div class="ot__toolbar">
+      <SyncAllButton kind="overview" />
+    </div>
 
     <div v-if="listQuery.isPending.value" class="ot__empty">loading…</div>
 
@@ -1083,6 +1088,7 @@ function widgetKindLabel(type: OverviewWidget['type']): string {
   color: var(--sw-fg-0); background: var(--sw-bg-2); padding: 1px 5px; border-radius: 3px;
 }
 .ot__empty { padding: 32px; text-align: center; color: var(--sw-fg-3); font-size: 12px; }
+.ot__toolbar { display: flex; justify-content: flex-end; margin: 8px 0; }
 
 .ot__split { display: grid; grid-template-columns: 280px 1fr; gap: 16px; align-items: start; }
 .ot__list {

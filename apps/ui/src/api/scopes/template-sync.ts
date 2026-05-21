@@ -75,4 +75,24 @@ export class TemplateSyncApi {
       `/api/admin/templates/${encodeURIComponent(name)}/push-bundled`,
     );
   }
+
+  /** Push the bundled copy of every template that differs from OAP
+   *  (`diverged`) or is absent on OAP (`bundled-fallback`), in one batch.
+   *  Scoped to `kind` so each admin page syncs only its own family. The
+   *  BFF re-derives the diff set, so this is a no-op for already-synced
+   *  templates. Returns the fresh status plus what was pushed. */
+  syncAll(kind?: TemplateKind): Promise<TemplateSyncAllResult> {
+    return this.bff.request<TemplateSyncAllResult>(
+      'POST',
+      '/api/admin/templates/sync-all',
+      kind ? { kind } : {},
+    );
+  }
+}
+
+export interface TemplateSyncAllResult extends TemplateSyncStatus {
+  /** Template names successfully pushed to OAP. */
+  synced: string[];
+  /** Templates that failed to push, with the error message. */
+  failed: Array<{ name: string; error: string }>;
 }

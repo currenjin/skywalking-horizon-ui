@@ -205,6 +205,7 @@ export const ROUTE_POLICY: Record<string, RoutePolicy> = {
   'POST /api/admin/templates/resync':              'overview:write',
   'POST /api/admin/templates/save':                'overview:write',
   'POST /api/admin/templates/:name/push-bundled':  'overview:write',
+  'POST /api/admin/templates/sync-all':            'overview:write',
 
   // ── Auth/admin self-introspection ────────────────────────────────
   'GET /api/admin/auth-status':                    'auth:read',

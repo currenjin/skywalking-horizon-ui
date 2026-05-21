@@ -114,6 +114,25 @@ export function ensureConfigBundle(): Promise<void> {
   return loadPromise;
 }
 
+/**
+ * Force a fresh bundle pull, ignoring the cached etag. Needed after a
+ * template push to OAP: the bundled content is unchanged (so an
+ * etag-gated fetch would 304 and keep stale `syncStatus` badges), but
+ * the OAP-side sync state HAS changed. Fetches without the etag so the
+ * server returns the full bundle with a freshly computed `syncStatus`.
+ */
+export async function refreshConfigBundle(): Promise<void> {
+  try {
+    const fresh = await bffClient.configs.bundle();
+    if (fresh) {
+      state.value = fresh;
+      writeStorage(fresh);
+    }
+  } catch {
+    /* leave the previous bundle in place — badges just stay stale */
+  }
+}
+
 /** Sync lookup. Returns null when the bundle hasn't loaded yet OR
  *  when the (layer, scope) pair has no widgets configured. */
 export function getDashboardConfig(

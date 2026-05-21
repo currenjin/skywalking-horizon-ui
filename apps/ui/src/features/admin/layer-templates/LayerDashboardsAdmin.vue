@@ -51,6 +51,7 @@ import TopList from '@/components/charts/TopList.vue';
 import { fmtMetric } from '@/utils/formatters';
 import { mockCardValue, mockLineSeries, mockRecordRows, mockTopGroups } from './widget-mock';
 import SyncStatusBanner from '@/features/admin/_shared/SyncStatusBanner.vue';
+import SyncAllButton from '@/features/admin/_shared/SyncAllButton.vue';
 import TemplateStatusBadge from '@/features/admin/_shared/TemplateStatusBadge.vue';
 import TemplateDiffModal from '@/features/admin/_shared/TemplateDiffModal.vue';
 import { useTemplateSync } from '@/features/admin/_shared/useTemplateSync';
@@ -104,12 +105,22 @@ const saveMsg = ref<string | null>(null);
 const layerListOpen = ref(true);
 /** Free-text filter for the layers rail — matches alias or key. */
 const layerSearch = ref('');
+// When on, the list shows only layers whose bundled copy differs from
+// OAP (diverged) or isn't on OAP yet (bundled-fallback) — i.e. the set
+// "Sync all to OAP" would push. Off shows every layer.
+const divergedOnly = ref(false);
+function isDivergedRow(key: string): boolean {
+  const s = sync.badgeFor(`horizon.layer.${key}`);
+  return s === 'diverged' || s === 'bundled-fallback';
+}
+const divergedCount = computed(() => templates.value.filter((t) => isDivergedRow(t.key)).length);
 const filteredTemplates = computed<AdminLayerTemplate[]>(() => {
   const q = layerSearch.value.trim().toLowerCase();
-  if (!q) return templates.value;
-  return templates.value.filter(
-    (t) => (t.alias ?? '').toLowerCase().includes(q) || t.key.toLowerCase().includes(q),
-  );
+  return templates.value.filter((t) => {
+    if (divergedOnly.value && !isDivergedRow(t.key)) return false;
+    if (!q) return true;
+    return (t.alias ?? '').toLowerCase().includes(q) || t.key.toLowerCase().includes(q);
+  });
 });
 
 /** Working copy — reactively edited. Diffs against `templates` to drive
@@ -947,6 +958,13 @@ const namingTest = computed<NamingTestResult>(() => {
               spellcheck="false"
             />
           </div>
+          <div class="list-actions">
+            <label class="diverged-filter" :class="{ on: divergedOnly }" :title="divergedCount === 0 ? 'No layers differ from OAP' : `${divergedCount} layer(s) differ from OAP`">
+              <input v-model="divergedOnly" type="checkbox" :disabled="divergedCount === 0" />
+              Diverged only<span v-if="divergedCount" class="diverged-count">{{ divergedCount }}</span>
+            </label>
+            <SyncAllButton kind="layer" />
+          </div>
           <button
             v-for="t in filteredTemplates"
             :key="t.key"
@@ -959,7 +977,7 @@ const namingTest = computed<NamingTestResult>(() => {
             <TemplateStatusBadge :status="sync.badgeFor(`horizon.layer.${t.key}`)" />
           </button>
           <p v-if="filteredTemplates.length === 0" class="list-empty">
-            No layers match “{{ layerSearch }}”.
+            {{ divergedOnly && !layerSearch.trim() ? 'No layers differ from OAP.' : `No layers match “${layerSearch}”.` }}
           </p>
         </template>
         <!-- Collapsed mode shows just colored dots for navigation; click
@@ -2128,6 +2146,33 @@ const namingTest = computed<NamingTestResult>(() => {
   outline: none;
   border-color: var(--sw-accent);
 }
+.list-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 8px;
+}
+.diverged-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--sw-fg-2);
+  cursor: pointer;
+  user-select: none;
+}
+.diverged-filter input:disabled { cursor: not-allowed; }
+.diverged-filter.on { color: var(--sw-fg-0); }
+.diverged-count {
+  margin-left: 2px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--sw-warn, var(--sw-accent));
+  color: #1a1a1a;
+  font-size: 10px;
+  font-weight: 700;
+}
+.list-actions .sw-btn { margin-left: auto; }
 .list-empty {
   padding: 8px 10px;
   font-size: 11px;
