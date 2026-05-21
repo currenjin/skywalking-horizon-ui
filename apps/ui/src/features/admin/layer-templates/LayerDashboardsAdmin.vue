@@ -922,6 +922,14 @@ const namingTest = computed<NamingTestResult>(() => {
 
     <SyncStatusBanner :banner="sync.banner.value" />
 
+    <div class="top-actions">
+      <label class="diverged-filter" :class="{ on: divergedOnly }" :title="divergedCount === 0 ? 'No layers differ from OAP' : `${divergedCount} layer(s) differ from OAP`">
+        <input v-model="divergedOnly" type="checkbox" :disabled="divergedCount === 0" />
+        Diverged only<span v-if="divergedCount" class="diverged-count">{{ divergedCount }}</span>
+      </label>
+      <SyncAllButton kind="layer" />
+    </div>
+
     <div v-if="error" class="banner err">{{ error }}</div>
     <div v-if="isLoading" class="empty">Loading templates…</div>
     <div v-else-if="templates.length === 0" class="empty">No layer templates loaded.</div>
@@ -954,13 +962,6 @@ const namingTest = computed<NamingTestResult>(() => {
               autocomplete="off"
               spellcheck="false"
             />
-          </div>
-          <div class="list-actions">
-            <label class="diverged-filter" :class="{ on: divergedOnly }" :title="divergedCount === 0 ? 'No layers differ from OAP' : `${divergedCount} layer(s) differ from OAP`">
-              <input v-model="divergedOnly" type="checkbox" :disabled="divergedCount === 0" />
-              Diverged only<span v-if="divergedCount" class="diverged-count">{{ divergedCount }}</span>
-            </label>
-            <SyncAllButton kind="layer" />
           </div>
           <button
             v-for="t in filteredTemplates"
@@ -2149,6 +2150,14 @@ const namingTest = computed<NamingTestResult>(() => {
   gap: 8px;
   padding: 0 10px 8px;
 }
+/* Page-level display/sync controls, directly under the sync banner. */
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 4px;
+}
+.top-actions .diverged-filter { margin-right: auto; }
 .diverged-filter {
   display: inline-flex;
   align-items: center;
