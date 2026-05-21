@@ -288,22 +288,20 @@ echo "Pushed release branch ${RELEASE_BRANCH_NAME} + tag ${TAG} (tag → release
 note "Step 9 — Build source tarball"
 
 SRC_TAR="${WORK_DIR}/${PRODUCT_NAME}-${RELEASE_VERSION}-src.tar.gz"
-# A "source release" is the canonical Apache artifact. It must be buildable
-# from scratch — no node_modules, no dist, no editor leftovers.
-tar -C "${WORK_DIR}" \
-    --exclude='skywalking-horizon-ui/.git' \
-    --exclude='skywalking-horizon-ui/.github/workflows/publish-image.yaml' \
-    --exclude='skywalking-horizon-ui/node_modules' \
-    --exclude='skywalking-horizon-ui/**/node_modules' \
-    --exclude='skywalking-horizon-ui/dist' \
-    --exclude='skywalking-horizon-ui/**/dist' \
-    --exclude='skywalking-horizon-ui/_deploy_tmp' \
-    --exclude='skywalking-horizon-ui/.DS_Store' \
-    --exclude='skywalking-horizon-ui/**/.DS_Store' \
-    --exclude='skywalking-horizon-ui/.release-work' \
-    --transform "s,^skywalking-horizon-ui,${PRODUCT_NAME}-${RELEASE_VERSION}-src," \
-    -czf "${SRC_TAR}" \
-    skywalking-horizon-ui
+SRC_STAGE_NAME="${PRODUCT_NAME}-${RELEASE_VERSION}-src"
+# A "source release" is the canonical Apache artifact: exactly the committed
+# files at the release tag — no .git, no node_modules, no dist, no editor
+# leftovers (git archive emits only tracked files, which excludes all of
+# those by .gitignore). We stage via `git archive` (portable — git does the
+# archiving) then repackage with plain `tar`, so this works the same on
+# macOS (bsdtar) and Linux (GNU tar). GNU-only `--transform` is avoided;
+# the tarball's top-level dir comes from `--prefix`.
+rm -rf "${WORK_DIR}/${SRC_STAGE_NAME}"
+git -C "${CLONE_DIR}" archive --format=tar --prefix="${SRC_STAGE_NAME}/" "${TAG}" \
+    | tar -C "${WORK_DIR}" -xf -
+# Drop the CI publish workflow from the source release (ASF-infra specific).
+rm -f "${WORK_DIR}/${SRC_STAGE_NAME}/.github/workflows/publish-image.yaml"
+tar -C "${WORK_DIR}" -czf "${SRC_TAR}" "${SRC_STAGE_NAME}"
 
 echo "Source tarball: ${SRC_TAR}"
 
