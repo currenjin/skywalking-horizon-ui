@@ -52,6 +52,7 @@ import { fmtMetric } from '@/utils/formatters';
 import { mockCardValue, mockLineSeries, mockRecordRows, mockTopGroups } from './widget-mock';
 import SyncStatusBanner from '@/features/admin/_shared/SyncStatusBanner.vue';
 import SyncAllButton from '@/features/admin/_shared/SyncAllButton.vue';
+import { refreshConfigBundle } from '@/controls/configBundle';
 import TemplateStatusBadge from '@/features/admin/_shared/TemplateStatusBadge.vue';
 import TemplateDiffModal from '@/features/admin/_shared/TemplateDiffModal.vue';
 import { useTemplateSync } from '@/features/admin/_shared/useTemplateSync';
@@ -502,26 +503,22 @@ function onDiffReset(): void {
 
 async function save(): Promise<void> {
   if (!draft.template || isSaving.value) return;
-  if (sync.readOnly.value) {
-    saveMsg.value = 'cannot save — OAP is unreachable, page is read-only';
-    return;
-  }
   isSaving.value = true;
   saveMsg.value = null;
   try {
-    // Save goes to OAP via the template-sync proxy (bundled is
-    // immutable at runtime). The BFF wraps draft.template in the
-    // canonical envelope before PUTting to OAP.
-    await bff.templateSync.save(`horizon.layer.${draft.template.key}`, draft.template);
-    // After OAP write, mirror the change into the in-memory editor
-    // list so the local diff baseline updates immediately.
+    // Save writes the LOCAL bundled template (not OAP) — the edit
+    // renders locally immediately and shows as diverged until it's
+    // published to OAP via "Sync all to OAP". Works even when OAP is
+    // unreachable.
+    await bff.templateSync.saveLocal(`horizon.layer.${draft.template.key}`, draft.template);
     const idx = templates.value.findIndex((t) => t.key === selectedKey.value);
     if (idx >= 0) {
       templates.value[idx] = JSON.parse(JSON.stringify(draft.template));
     }
     syncDraft();
-    saveMsg.value = 'Saved to OAP.';
-    setTimeout(() => (saveMsg.value = null), 2400);
+    await refreshConfigBundle(); // refresh diverged badges + sidebar warning
+    saveMsg.value = 'Saved locally — not yet live for others. Use “Sync all to OAP” to publish this change.';
+    setTimeout(() => (saveMsg.value = null), 7000);
   } catch (err) {
     saveMsg.value = err instanceof Error ? err.message : String(err);
   } finally {
@@ -1029,11 +1026,11 @@ const namingTest = computed<NamingTestResult>(() => {
               <button
                 class="sw-btn is-primary"
                 type="button"
-                :disabled="!dirty || isSaving || sync.readOnly.value"
-                :title="sync.readOnly.value ? 'OAP unreachable — page is read-only' : ''"
+                :disabled="!dirty || isSaving"
+                title="Save this edit to the local bundled template. Publish it to OAP for everyone with “Sync all to OAP”."
                 @click="save"
               >
-                {{ isSaving ? 'Saving…' : sync.readOnly.value ? 'Read-only' : 'Save to OAP' }}
+                {{ isSaving ? 'Saving…' : 'Save locally' }}
               </button>
             </div>
           </div>

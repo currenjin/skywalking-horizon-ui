@@ -204,6 +204,7 @@ export const ROUTE_POLICY: Record<string, RoutePolicy> = {
   'GET /api/admin/templates/sync-status':          'overview:read',
   'POST /api/admin/templates/resync':              'overview:write',
   'POST /api/admin/templates/save':                'overview:write',
+  'POST /api/admin/templates/save-local':          'overview:write',
   'POST /api/admin/templates/:name/push-bundled':  'overview:write',
   'POST /api/admin/templates/sync-all':            'overview:write',
 

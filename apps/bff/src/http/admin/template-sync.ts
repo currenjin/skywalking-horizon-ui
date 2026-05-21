@@ -67,6 +67,8 @@ import {
   serializeEnvelope,
   type TemplateKind,
 } from '../../logic/templates/names.js';
+import { writeLayerTemplate } from '../../logic/layers/loader.js';
+import { writeOverviewDashboard } from '../../logic/overview/loader.js';
 import { logger } from '../../logger.js';
 
 export interface TemplateSyncAdminDeps {
@@ -189,6 +191,48 @@ export function registerTemplateSyncAdminRoutes(
     resync();
     const fresh = await loadStatus(deps);
     return reply.send({ ...fresh, synced, failed });
+  });
+
+  // Save-local: write the edited template to the BUNDLED file on disk
+  // (the local seed), NOT to OAP. The in-memory cache is refreshed so
+  // the local instance immediately renders the edit; the template then
+  // shows as `diverged` until the operator manually pushes it to OAP
+  // via sync-all. This is the "edit locally → preview → publish" flow.
+  app.post<{
+    Body: { name?: string; content?: unknown };
+  }>('/api/admin/templates/save-local', { preHandler: auth }, async (req, reply) => {
+    const { name, content } = req.body ?? {};
+    if (typeof name !== 'string' || content === undefined || content === null || typeof content !== 'object') {
+      return reply.code(400).send({
+        code: 'invalid_save_body',
+        message: 'body must be { name: string, content: object }',
+      });
+    }
+    const parsed = parseName(name);
+    if (!parsed) {
+      return reply.code(400).send({
+        code: 'invalid_template_name',
+        message: `expected horizon.<overview|layer|alert>.<key>, got ${JSON.stringify(name)}`,
+      });
+    }
+    try {
+      if (parsed.kind === 'layer') {
+        writeLayerTemplate(content as Parameters<typeof writeLayerTemplate>[0]);
+      } else if (parsed.kind === 'overview') {
+        writeOverviewDashboard(parsed.key, content as Parameters<typeof writeOverviewDashboard>[1]);
+      } else {
+        return reply.code(400).send({
+          code: 'unsupported_kind',
+          message: `local save supports layer + overview templates, not ${parsed.kind}`,
+        });
+      }
+    } catch (err) {
+      logger.warn({ err: errMsg(err), name }, 'save-local (bundled write) failed');
+      return reply.code(500).send({ code: 'local_write_failed', message: errMsg(err) });
+    }
+    resync();
+    const fresh = await loadStatus(deps);
+    return reply.send(fresh);
   });
 
   app.post<{

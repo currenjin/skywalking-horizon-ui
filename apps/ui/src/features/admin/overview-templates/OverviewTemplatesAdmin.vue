@@ -47,6 +47,7 @@ import { bff } from '@/api/client';
 import { useLayers } from '@/shell/useLayers';
 import SyncStatusBanner from '@/features/admin/_shared/SyncStatusBanner.vue';
 import SyncAllButton from '@/features/admin/_shared/SyncAllButton.vue';
+import { refreshConfigBundle } from '@/controls/configBundle';
 import TemplateStatusBadge from '@/features/admin/_shared/TemplateStatusBadge.vue';
 import TemplateDiffModal from '@/features/admin/_shared/TemplateDiffModal.vue';
 import { useTemplateSync } from '@/features/admin/_shared/useTemplateSync';
@@ -329,20 +330,15 @@ async function onDiffReset(): Promise<void> {
 
 async function onSave(): Promise<void> {
   if (!draft.value || !selectedId.value) return;
-  if (sync.readOnly.value) {
-    setFlash('cannot save — OAP is unreachable, page is read-only');
-    return;
-  }
   saving.value = true;
   try {
-    // Save goes to OAP via the BFF template-sync proxy (not to disk).
-    // The new `/api/admin/templates/save` endpoint wraps content in
-    // the canonical envelope and PUTs it to OAP. Bundled JSON stays
-    // immutable at runtime — it's a code-shape decision, not an
-    // operator one.
-    await bff.templateSync.save(`horizon.overview.${selectedId.value}`, draft.value);
+    // Save writes the LOCAL bundled template (not OAP). The edit renders
+    // locally and shows as diverged until published to OAP via "Sync all
+    // to OAP". Works even when OAP is unreachable.
+    await bff.templateSync.saveLocal(`horizon.overview.${selectedId.value}`, draft.value);
     await detailQuery.refetch();
-    setFlash('saved to OAP · reload the overview to see widget changes');
+    await refreshConfigBundle(); // refresh diverged badges + sidebar warning
+    setFlash('Saved locally — not yet live for others. Use “Sync all to OAP” to publish.');
   } catch (err) {
     setFlash(err instanceof Error ? `error: ${err.message}` : 'save failed');
   } finally {
@@ -1052,11 +1048,11 @@ function widgetKindLabel(type: OverviewWidget['type']): string {
             <button
               type="button"
               class="ot__btn ot__btn--primary"
-              :disabled="!isDirty || saving || sync.readOnly.value"
-              :title="sync.readOnly.value ? 'OAP unreachable — page is read-only' : ''"
+              :disabled="!isDirty || saving"
+              title="Save this edit to the local bundled template. Publish it to OAP for everyone with “Sync all to OAP”."
               @click="onSave"
             >
-              {{ saving ? 'saving…' : sync.readOnly.value ? 'read-only' : 'save to OAP' }}
+              {{ saving ? 'saving…' : 'save locally' }}
             </button>
           </div>
         </template>

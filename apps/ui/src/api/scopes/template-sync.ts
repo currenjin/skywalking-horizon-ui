@@ -67,6 +67,17 @@ export class TemplateSyncApi {
     });
   }
 
+  /** Save a template to the LOCAL bundled file (not OAP). The template
+   *  immediately renders locally and shows as `diverged` until pushed to
+   *  OAP via {@link syncAll}. This is the edit-locally→preview→publish
+   *  path; `save()` (direct-to-OAP) is retained for callers that want it. */
+  saveLocal(name: string, content: unknown): Promise<TemplateSyncStatus> {
+    return this.bff.request<TemplateSyncStatus>('POST', '/api/admin/templates/save-local', {
+      name,
+      content,
+    });
+  }
+
   /** Operator wants the bundled JSON to overwrite whatever OAP has for
    *  this name. Used for "adopt my code defaults" from the diff view. */
   pushBundled(name: string): Promise<TemplateSyncStatus> {

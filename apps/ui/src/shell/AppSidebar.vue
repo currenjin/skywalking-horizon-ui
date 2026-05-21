@@ -34,6 +34,7 @@ import { useLandingOrder } from '@/shell/useLandingOrder';
 import { useOverviewDashboards } from '@/render/overview/useOverviewDashboards';
 import { useDebugPanel } from '@/controls/debugPanel';
 import { useAlarmCount } from '@/shell/useAlarmCount';
+import { useConfigBundle } from '@/controls/configBundle';
 
 const { enabled: debugPanelEnabled, toggle: toggleDebugPanel } = useDebugPanel();
 /* Shares the same composable as the topbar badge — one query feeds
@@ -42,6 +43,7 @@ const { enabled: debugPanelEnabled, toggle: toggleDebugPanel } = useDebugPanel()
 const alarmCount = useAlarmCount();
 
 const auth = useAuthStore();
+const { bundle } = useConfigBundle();
 const router = useRouter();
 const themeStore = useThemeStore();
 const isLightAppearance = computed<boolean>(
@@ -265,10 +267,30 @@ const sections: NavSection[] = [
  * Hiding is a UX nicety — the BFF enforces the same verbs server-side,
  * so this is "don't show controls that won't work," not security.
  */
+// Count of templates edited locally but not yet pushed to OAP
+// (diverged = bundled differs from the stored remote). Drives the
+// yellow "unsynced changes" warning on the template-admin menu rows.
+function divergedCount(kind: 'layer' | 'overview'): number {
+  const badges = bundle.value?.syncStatus?.badges ?? [];
+  return badges.filter((b) => b.kind === kind && b.status === 'diverged').length;
+}
+/** Per-route warn badge for the template-admin rows. */
+function syncBadgeFor(to: string): NavRow['badge'] | undefined {
+  const kind = to === '/admin/layer-dashboards' ? 'layer' : to === '/admin/overview-templates' ? 'overview' : null;
+  if (!kind) return undefined;
+  const n = divergedCount(kind);
+  return n > 0 ? { text: String(n), kind: 'warn' } : undefined;
+}
+
 const visibleSections = computed<NavSection[]>(() => {
   const out: NavSection[] = [];
   for (const sec of sections) {
-    const links = sec.links.filter((r) => !r.verb || auth.hasVerb(r.verb));
+    const links = sec.links
+      .filter((r) => !r.verb || auth.hasVerb(r.verb))
+      .map((r) => {
+        const badge = syncBadgeFor(r.to);
+        return badge ? { ...r, badge } : r;
+      });
     if (links.length === 0) continue;
     out.push({ kicker: sec.kicker, links });
   }
