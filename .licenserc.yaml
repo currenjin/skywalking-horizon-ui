@@ -41,6 +41,11 @@ header:
     - 'HEADER'
     - '**/dist/**'
     - '**/node_modules/**'
+    # Release scratch dirs: release.sh / release-finalize.sh clone + stage
+    # the repo here. The check must not recurse into that nested copy (its
+    # paths don't match the repo-root-relative ignores below, e.g. .claude/**).
+    - '**/.release-work/**'
+    - '**/.finalize-work/**'
     - 'docs/**'
     # Agent / dev tooling, not shippable source — skill configs (e.g.
     # local-boot's horizon.*.yaml) carry no ASF header.
