@@ -264,6 +264,18 @@ const { endpoints: endpointList, isFetching: endpointsLoading } = useLayerEndpoi
   endpointQuery,
   endpointLimit,
 );
+// URL-pinned endpoint validation. The list above is the recent top-N
+// (empty query); a deep-linked endpoint outside it would look "stale".
+// This re-queries by the pinned endpoint's own name to confirm it really
+// exists for this service before we discard the deep link. Inactive
+// (empty query) once the pin is null or already present in the default list.
+const pinnedEndpointQuery = computed(() => {
+  const pinned = selectedEndpoint.value;
+  if (!pinned) return '';
+  return endpointList.value.some((e) => e.name === pinned) ? '' : pinned;
+});
+const { endpoints: pinnedEndpointMatches, isFetching: pinnedEndpointLoading } =
+  useLayerEndpoints(layerKey, serviceName, pinnedEndpointQuery, endpointLimit);
 // Endpoint-scope orchestration — explicit sequence so the loading
 // flow is deterministic:
 //   1. wait for landing rows
@@ -293,10 +305,14 @@ watchEffect(() => {
     return;
   }
   if (!list.some((e) => e.name === selectedEndpoint.value)) {
+    // Outside the default top-N — confirm via the targeted name search
+    // before discarding the deep link.
+    if (pinnedEndpointQuery.value && pinnedEndpointLoading.value) return; // wait for the lookup
+    if (pinnedEndpointMatches.value.some((e) => e.name === selectedEndpoint.value)) return; // valid → keep
     pushEvent(
       'fallback',
       'info',
-      `URL endpoint "${selectedEndpoint.value}" not in ${serviceName.value} · falling back to "${list[0].name}"`,
+      `URL endpoint "${selectedEndpoint.value}" not found in ${serviceName.value} · falling back to "${list[0].name}"`,
     );
     setSelectedEndpoint(list[0].name);
   }
@@ -331,9 +347,19 @@ const effectiveInstance = computed<string | null>(() => {
 const effectiveEndpoint = computed<string | null>(() => {
   const v = selectedEndpoint.value;
   if (!v) return null;
-  return endpointList.value.some((e) => e.name === v) ? v : null;
+  // Valid if in the default top-N OR confirmed by the targeted name lookup
+  // (a deep-linked endpoint outside the recent list) — otherwise the
+  // dashboard would stay gated forever for a perfectly valid pin.
+  if (endpointList.value.some((e) => e.name === v)) return v;
+  if (pinnedEndpointMatches.value.some((e) => e.name === v)) return v;
+  return null;
 });
 const widgetsForQuery = computed(() => config.value?.widgets ?? []);
+// Hold the metrics fetch until the config bundle has resolved WITH widgets.
+// A resolved-but-empty config means "no dashboard for this layer/scope",
+// so we don't fire (which would otherwise make the BFF substitute its own
+// default widget set); metrics run only for resolved widgets.
+const configReady = computed(() => widgetsForQuery.value.length > 0);
 const { data, isFetching, error } = useLayerDashboard(
   layerKey,
   serviceName,
@@ -342,6 +368,7 @@ const { data, isFetching, error } = useLayerDashboard(
   { instance: effectiveInstance, endpoint: effectiveEndpoint },
   rangeRef,
   widgetsForQuery,
+  configReady,
 );
 
 // Sequential page-init events for the EventTicker — config →
@@ -356,9 +383,9 @@ useLayerPageOrchestrator({
   serviceList: landingRows,
   effectiveService: serviceName,
   instanceList,
-  effectiveInstance: selectedInstance,
+  effectiveInstance,
   endpointList,
-  effectiveEndpoint: selectedEndpoint,
+  effectiveEndpoint,
   dashboard: data,
 });
 
@@ -677,7 +704,10 @@ function isVisible(
          sequence (which read as a slow, jumpy entry). The "no widgets"
          branch below only shows once config has actually loaded and the
          layer genuinely defines none. -->
-    <div v-if="reachable && (configLoading || !dataIsFresh)" class="empty reading">
+    <div
+      v-if="reachable && (configLoading || (!dataIsFresh && widgets.length > 0))"
+      class="empty reading"
+    >
       <span class="reading-dot" />
       <span>
         Reading data
